@@ -45,6 +45,8 @@ export type LayoutType =
   | "button-loader"
   | "card-loader";
 export type ExportFormat = "web" | "swift";
+/** Code exports plus sending to a BLE pixel panel. */
+export type ExportTarget = ExportFormat | "idotmatrix";
 export type PatternPresetId = "spinner" | "checker" | "ring" | "wave-diagonal";
 
 export type Project = {

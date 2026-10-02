@@ -2,6 +2,7 @@
 
 import { create } from "zustand";
 import { normalizeCellShape } from "@/lib/cell-shapes";
+import { MAX_GRID_SIZE, MIN_GRID_SIZE, MIN_SLIDER_GRID_SIZE } from "@/lib/grid-limits";
 import { createMockProject, PROJECT_VERSION } from "@/lib/mock-project";
 import { getDefaultMotionConfig } from "@/lib/motion-presets";
 import { buildPatternCells } from "@/lib/pattern-presets";
@@ -12,7 +13,7 @@ import {
   AnimationStyle,
   CellShape,
   Direction,
-  ExportFormat,
+  ExportTarget,
   GridConfig,
   LayoutType,
   LoaderKind,
@@ -29,7 +30,7 @@ type EditorState = {
   selectedLoaderId: string;
   focusModeLoaderId: string | null;
   clipboardLoader: LoaderComponent | null;
-  exportFormat: ExportFormat;
+  exportFormat: ExportTarget;
   isPreviewing: boolean;
   hydrate: () => void;
   selectLoader: (loaderId: string) => void;
@@ -70,7 +71,7 @@ type EditorState = {
   setGridGap: (value: number) => void;
   setLayoutType: (type: LayoutType) => void;
   setLabel: (value: string) => void;
-  setExportFormat: (format: ExportFormat) => void;
+  setExportFormat: (format: ExportTarget) => void;
   togglePreview: () => void;
   enterFocusMode: (loaderId?: string) => void;
   exitFocusMode: () => void;
@@ -108,8 +109,8 @@ function sanitizeGrid(grid?: GridConfig): GridConfig {
   const source = grid ?? DEFAULT_DRAWN_GRID;
 
   return {
-    rows: clamp(Math.round(source.rows ?? DEFAULT_DRAWN_GRID.rows), 2, 13),
-    cols: clamp(Math.round(source.cols ?? DEFAULT_DRAWN_GRID.cols), 2, 13),
+    rows: clamp(Math.round(source.rows ?? DEFAULT_DRAWN_GRID.rows), MIN_GRID_SIZE, MAX_GRID_SIZE),
+    cols: clamp(Math.round(source.cols ?? DEFAULT_DRAWN_GRID.cols), MIN_GRID_SIZE, MAX_GRID_SIZE),
     cellSize: source.cellSize ?? DEFAULT_DRAWN_GRID.cellSize,
     gap: clamp(Math.round(source.gap ?? DEFAULT_DRAWN_GRID.gap), 0, 20),
     symmetryX: source.symmetryX,
@@ -447,8 +448,8 @@ function normalizeProject(project: Project): Project {
       ...project.assets,
       patterns: (project.assets.patterns ?? []).map((pattern) => ({
         ...pattern,
-        rows: clamp(Math.round(pattern.rows ?? DEFAULT_DRAWN_GRID.rows), 2, 13),
-        cols: clamp(Math.round(pattern.cols ?? DEFAULT_DRAWN_GRID.cols), 2, 13),
+        rows: clamp(Math.round(pattern.rows ?? DEFAULT_DRAWN_GRID.rows), MIN_GRID_SIZE, MAX_GRID_SIZE),
+        cols: clamp(Math.round(pattern.cols ?? DEFAULT_DRAWN_GRID.cols), MIN_GRID_SIZE, MAX_GRID_SIZE),
         presetId: pattern.presetId ?? "custom"
       })),
       templates: []
@@ -1146,7 +1147,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     }),
   setGridSize: (size) =>
     set((state) => {
-      const nextSize = clamp(Math.round(size), 3, 13);
+      const nextSize = clamp(Math.round(size), MIN_SLIDER_GRID_SIZE, MAX_GRID_SIZE);
       const project = updateSelectedLoader(state.project, state.selectedLoaderId, (loader) => {
         const nextGrid = sanitizeGrid({
           ...loader.pattern.grid,

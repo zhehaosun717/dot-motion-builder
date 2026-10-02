@@ -12,7 +12,8 @@
     "typecheck": "tsc --noEmit",
     "test:motion": "node scripts/test-motion.cjs",
     "test:exports": "node scripts/test-exports.cjs",
-    "test": "pnpm run typecheck && pnpm run test:motion && pnpm run test:exports"
+    "test": "pnpm run typecheck && pnpm run test:motion && pnpm run test:exports && pnpm run test:idotmatrix",
+    "test:idotmatrix": "node scripts/test-idotmatrix.cjs && node scripts/test-idotmatrix-live.cjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.4.1",

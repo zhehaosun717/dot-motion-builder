@@ -1,16 +1,19 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { MatrixExport } from "@/components/editor/matrix-export";
 import { generateExportArtifact } from "@/lib/exporters";
+import { matrixCopy } from "@/lib/idotmatrix/matrix-copy";
 import { Language, uiCopy } from "@/lib/ui-copy";
 import { useEditorStore, useSelectedLoader } from "@/stores/use-editor-store";
-import { ExportFormat } from "@/types/dot-motion";
+import { ExportFormat, ExportTarget } from "@/types/dot-motion";
 import { Button } from "@/toolcraft/ui/components/primitives/button";
 import { SegmentedControl } from "@/toolcraft/ui/components/controls/segmented/segmented-control";
 
-const formats: { value: ExportFormat; label: string }[] = [
+const formats: { value: ExportTarget; label: string }[] = [
   { value: "web", label: "JavaScript" },
-  { value: "swift", label: "Swift" }
+  { value: "swift", label: "Swift" },
+  { value: "idotmatrix", label: matrixCopy.en.format }
 ];
 
 type ExportPanelProps = {
@@ -26,6 +29,10 @@ function downloadBlob(blob: Blob, filename: string) {
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+function isExportTarget(value: string): value is ExportTarget {
+  return formats.some((item) => item.value === value);
+}
+
 export function ExportPanel({ language }: ExportPanelProps) {
   const project = useEditorStore((state) => state.project);
   const format = useEditorStore((state) => state.exportFormat);
@@ -34,10 +41,11 @@ export function ExportPanel({ language }: ExportPanelProps) {
   const [copied, setCopied] = useState(false);
   const [copyError, setCopyError] = useState(false);
   const t = uiCopy[language];
-  const effectiveFormat = formats.some((item) => item.value === format) ? format : "web";
+  const effectiveFormat: ExportTarget = isExportTarget(format) ? format : "web";
+  const codeFormat: ExportFormat | null = effectiveFormat === "idotmatrix" ? null : effectiveFormat;
   const artifact = useMemo(
-    () => generateExportArtifact(effectiveFormat, project, loader),
-    [effectiveFormat, project, loader]
+    () => (codeFormat ? generateExportArtifact(codeFormat, project, loader) : null),
+    [codeFormat, project, loader]
   );
   useEffect(() => { setCopied(false); setCopyError(false); }, [artifact]);
   useEffect(() => {
@@ -47,6 +55,7 @@ export function ExportPanel({ language }: ExportPanelProps) {
   }, [copied]);
 
   async function handleCopy() {
+    if (!artifact) return;
     try {
       if (!navigator.clipboard?.writeText) throw new Error("Clipboard unavailable");
       await navigator.clipboard.writeText(artifact.content);
@@ -58,6 +67,7 @@ export function ExportPanel({ language }: ExportPanelProps) {
   }
 
   async function handleDownload() {
+    if (!artifact) return;
     downloadBlob(new Blob([artifact.content], { type: artifact.mimeType }), artifact.filename);
   }
 
@@ -75,23 +85,29 @@ export function ExportPanel({ language }: ExportPanelProps) {
           value={effectiveFormat}
           options={formats}
           onValueChange={(value) => {
-            if (value === "web" || value === "swift") setFormat(value);
+            if (isExportTarget(value)) setFormat(value);
           }}
         />
       </div>
-      <div className="export-meta">
-        <span>{artifact.filename}</span>
-      </div>
-      <pre className="export-code">{artifact.content}</pre>
-      <div className="panel__actions">
-        {copyError ? <p role="alert">{language === "cn" ? "复制失败，请下载文件或手动复制。" : "Copy failed. Download the file or copy manually."}</p> : null}
-        <Button type="button" variant="outline" onClick={handleCopy}>
-          {copied ? t.copied : t.copyOutput}
-        </Button>
-        <Button type="button" variant="default" onClick={handleDownload}>
-          {t.downloadFile}
-        </Button>
-      </div>
+      {artifact ? (
+        <>
+          <div className="export-meta">
+            <span>{artifact.filename}</span>
+          </div>
+          <pre className="export-code">{artifact.content}</pre>
+          <div className="panel__actions">
+            {copyError ? <p role="alert">{language === "cn" ? "复制失败，请下载文件或手动复制。" : "Copy failed. Download the file or copy manually."}</p> : null}
+            <Button type="button" variant="outline" onClick={handleCopy}>
+              {copied ? t.copied : t.copyOutput}
+            </Button>
+            <Button type="button" variant="default" onClick={handleDownload}>
+              {t.downloadFile}
+            </Button>
+          </div>
+        </>
+      ) : (
+        <MatrixExport language={language} onDownload={downloadBlob} />
+      )}
     </section>
   );
 }

@@ -27,7 +27,7 @@ assert.deepEqual(
   [],
   'fill-dependent and retired presets must not return'
 );
-for (const preset of motionPresets) for (const size of [2, 5, 8, 13]) {
+for (const preset of motionPresets) for (const size of [2, 5, 8, 13, 32]) {
   const loader = structuredClone(createMockProject().loaders[0]);
   loader.pattern.grid.rows = loader.pattern.grid.cols = size;
   loader.pattern.activeCells = [0, size * size - 1];
@@ -96,7 +96,7 @@ assert(
 );
 
 for (const preset of motionPresets) {
-  for (const size of [2, 5, 8, 13]) {
+  for (const size of [2, 5, 8, 13, 32]) {
     const loader = structuredClone(createMockProject().loaders[0]);
     loader.pattern.grid.rows = loader.pattern.grid.cols = size;
     loader.pattern.activeCells = [0, Math.floor(size * size / 2), size * size - 1];

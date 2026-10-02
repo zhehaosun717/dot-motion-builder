@@ -4,8 +4,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent } from "react";
 import { DotGridEditor } from "@/components/editor/dot-grid-editor";
 import { ExportPanel } from "@/components/editor/export-panel";
+import { LiveMatrixControls } from "@/components/editor/live-matrix-controls";
+import { useLiveEditorSync } from "@/components/editor/use-live-editor-sync";
 import { PreviewStage, SequencePreviewStage } from "@/components/editor/preview-stage";
 import { normalizeCellShape, shapeOptions } from "@/lib/cell-shapes";
+import { MAX_GRID_SIZE, MIN_SLIDER_GRID_SIZE } from "@/lib/grid-limits";
 import { motionPresets } from "@/lib/motion-presets";
 import { inactiveStyleCopy, Language, motionPresetCopy, uiCopy } from "@/lib/ui-copy";
 import { useEditorStore } from "@/stores/use-editor-store";
@@ -322,6 +325,7 @@ export function EditorApp() {
   const [isExportOpen, setIsExportOpen] = useState(false);
   const [propertiesCollapsed, setPropertiesCollapsed] = useState(false);
   const [previewScope, setPreviewScope] = useState<"none" | "selected" | "all">("none");
+  useLiveEditorSync(project, editingLoader, previewScope !== "none");
   const [language, setLanguage] = useState<Language>("cn");
   const [showZoomHud, setShowZoomHud] = useState(false);
   const [collapsedSections, setCollapsedSections] = useState({
@@ -716,7 +720,13 @@ export function EditorApp() {
   }
 
   if (!hydrated) {
-    return <div className="loading-shell">Loading editor...</div>;
+    // This lone English line is the whole server-rendered page, so browser translators rewrite it
+    // before hydration and React reports a text mismatch. Opt it out of translation.
+    return (
+      <div className="loading-shell notranslate" translate="no" suppressHydrationWarning>
+        Loading editor...
+      </div>
+    );
   }
 
   return (
@@ -764,6 +774,7 @@ export function EditorApp() {
           ) : null}
         </div>
         <div className="builder-topbar__actions">
+          <LiveMatrixControls language={language} />
           <Button type="button" className="toolbar-button" variant="outline" size="default" onClick={togglePreviewAll}>
             {previewScope === "all" ? t.stopPreview : t.previewAll}
           </Button>
@@ -938,7 +949,7 @@ export function EditorApp() {
                   onCollapsedChange={(value) => setCollapsedSections(current => ({ ...current, grid: value }))}
                 >
                   <div className="toolcraft-control-stack">
-                    <SliderControl showFill variant="discrete" markerCount={11} name={t.gridSize} min={3} max={13} step={1} value={editingLoader.pattern.grid.rows} valueLabel={`${editingLoader.pattern.grid.rows}×${editingLoader.pattern.grid.cols}`} onValueChange={changeGridSize} />
+                    <SliderControl showFill variant="discrete" markerCount={11} name={t.gridSize} min={MIN_SLIDER_GRID_SIZE} max={MAX_GRID_SIZE} step={1} value={editingLoader.pattern.grid.rows} valueLabel={`${editingLoader.pattern.grid.rows}×${editingLoader.pattern.grid.cols}`} onValueChange={changeGridSize} />
                     <SelectControl
                       name={t.shape}
                       value={selectedShape}

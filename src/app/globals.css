@@ -2306,6 +2306,68 @@ select {
   min-height: 38px;
 }
 
+.panel--export .export-platform-control {
+  width: min(420px, 100%);
+}
+
+.matrix-export {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  align-items: flex-start;
+  gap: 20px;
+  overflow: auto;
+}
+
+.matrix-preview {
+  flex: 0 0 auto;
+  width: min(256px, 100%);
+  height: auto;
+  aspect-ratio: 1;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 14px;
+  background: #050607;
+}
+
+.matrix-export__side {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 240px;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.matrix-export__status,
+.matrix-export__note {
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.matrix-export__status {
+  color: var(--muted-strong);
+}
+
+.matrix-export__note {
+  color: var(--danger);
+}
+
+.matrix-export .panel__actions {
+  flex-wrap: wrap;
+  justify-content: flex-start;
+}
+
+@media (max-width: 640px) {
+  .matrix-export {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .matrix-preview {
+    align-self: center;
+  }
+}
+
 @media (max-width: 1200px) {
   body {
     overflow: auto;
@@ -2363,4 +2425,10 @@ select {
     margin-left: 0;
   }
 
+}
+
+.toolbar-button.is-live {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
 }
