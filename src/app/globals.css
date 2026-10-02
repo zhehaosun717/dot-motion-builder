@@ -2432,3 +2432,14 @@ select {
   background: var(--accent-soft);
   color: var(--accent-strong);
 }
+
+/* Dense grids (above 13x13, up to a 32x32 LED panel): one small glow layer and no per-cell
+   transitions, otherwise a thousand overlapping blurred shadows make every repaint expensive. */
+.dot-grid--dense .dot-grid__cell {
+  transition: none;
+}
+
+.dot-grid--dense .dot-grid__cell--canvas.is-active,
+.dot-grid--dense .dot-grid__cell.is-active {
+  box-shadow: 0 0 var(--cell-glow-size, 4px) color-mix(in srgb, var(--cell-glow-color, var(--cell-color)) 58%, transparent);
+}

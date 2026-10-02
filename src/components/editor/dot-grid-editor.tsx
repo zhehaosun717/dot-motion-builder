@@ -1,9 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef } from "react";
+import type { CSSProperties } from "react";
 import { getCellShapeClassName, getCellShapeStyle } from "@/lib/cell-shapes";
 import { getCanvasGridMetrics } from "@/lib/canvas-grid-metrics";
 import { rgbaWithOpacity } from "@/lib/colors";
+import { LEGACY_MAX_GRID_SIZE } from "@/lib/grid-limits";
 import { LoaderComponent } from "@/types/dot-motion";
 
 type DotGridEditorProps = {
@@ -13,6 +15,35 @@ type DotGridEditorProps = {
   variant?: "default" | "canvas";
 };
 
+/** The cell size the original glow values were tuned for; dense grids scale their glow down from it. */
+const GLOW_REFERENCE_CELL = 22;
+
+type DotCellProps = {
+  index: number;
+  active: boolean;
+  className: string;
+  style: CSSProperties;
+  inactiveBackground: string;
+  onDown: (index: number) => void;
+  onEnter: (index: number) => void;
+};
+
+/** Memoised so toggling one cell re-renders one button, not all 1024 of a 32x32 grid. */
+const DotCell = memo(function DotCell({ index, active, className, style, inactiveBackground, onDown, onEnter }: DotCellProps) {
+  return (
+    <button
+      type="button"
+      data-dot-cell="true"
+      className={`${className}${active ? " is-active" : ""}`}
+      onClick={(event) => event.preventDefault()}
+      onPointerDown={() => onDown(index)}
+      onPointerEnter={() => onEnter(index)}
+      style={active ? style : { ...style, background: inactiveBackground }}
+      aria-label={`Toggle cell ${index + 1}`}
+    />
+  );
+});
+
 export function DotGridEditor({
   loader,
   onToggleCell,
@@ -20,27 +51,16 @@ export function DotGridEditor({
   variant = "default"
 }: DotGridEditorProps) {
   const { rows, cols, cellSize, gap } = loader.pattern.grid;
-  const cells = Array.from({ length: rows * cols }, (_, index) => index);
   const canvasMetrics = useMemo(() => getCanvasGridMetrics(loader), [loader]);
-  const dragStateRef = useRef<{
-    nextValue: boolean;
-    visited: Set<number>;
-  } | null>(null);
-  const renderGap = useMemo(() => {
-    if (variant === "canvas") {
-      return canvasMetrics.gap;
-    }
+  const activeCells = useMemo(() => new Set(loader.pattern.activeCells), [loader.pattern.activeCells]);
+  const dense = Math.max(rows, cols) > LEGACY_MAX_GRID_SIZE;
+  const renderGap = variant === "canvas" ? canvasMetrics.gap : gap;
+  const renderCellSize = variant === "canvas" ? canvasMetrics.cellSize : cellSize;
+  const dragStateRef = useRef<{ nextValue: boolean; visited: Set<number> } | null>(null);
 
-    return gap;
-  }, [canvasMetrics.gap, gap, variant]);
-
-  const renderCellSize = useMemo(() => {
-    if (variant === "canvas") {
-      return canvasMetrics.cellSize;
-    }
-
-    return cellSize;
-  }, [canvasMetrics.cellSize, cellSize, variant]);
+  // Handlers stay stable for the memoised cells and read the latest props from this ref.
+  const latest = useRef({ activeCells, onToggleCell, onSetCellActive });
+  latest.current = { activeCells, onToggleCell, onSetCellActive };
 
   useEffect(() => {
     function endDrag() {
@@ -55,81 +75,70 @@ export function DotGridEditor({
     };
   }, []);
 
-  function applyCell(cellIndex: number, active: boolean) {
-    if (onSetCellActive) {
-      onSetCellActive(cellIndex, active);
+  const applyCell = useCallback((cellIndex: number, active: boolean) => {
+    const current = latest.current;
+    if (current.onSetCellActive) {
+      current.onSetCellActive(cellIndex, active);
       return;
     }
+    if (current.activeCells.has(cellIndex) !== active) current.onToggleCell(cellIndex);
+  }, []);
 
-    const isActive = loader.pattern.activeCells.includes(cellIndex);
-    if (isActive !== active) {
-      onToggleCell(cellIndex);
-    }
-  }
-
-  function handlePointerDown(cellIndex: number) {
-    const isActive = loader.pattern.activeCells.includes(cellIndex);
-    const nextValue = !isActive;
-    dragStateRef.current = {
-      nextValue,
-      visited: new Set([cellIndex])
-    };
+  const handlePointerDown = useCallback((cellIndex: number) => {
+    const nextValue = !latest.current.activeCells.has(cellIndex);
+    dragStateRef.current = { nextValue, visited: new Set([cellIndex]) };
     applyCell(cellIndex, nextValue);
-  }
+  }, [applyCell]);
 
-  function handlePointerEnter(cellIndex: number) {
+  const handlePointerEnter = useCallback((cellIndex: number) => {
     const dragState = dragStateRef.current;
-    if (!dragState || dragState.visited.has(cellIndex)) {
-      return;
-    }
-
+    if (!dragState || dragState.visited.has(cellIndex)) return;
     dragState.visited.add(cellIndex);
     applyCell(cellIndex, dragState.nextValue);
-  }
+  }, [applyCell]);
+
+  const { primaryColor, primaryAlpha, backgroundColor, backgroundAlpha, shadow, glow, cellShape, innerRadius } = loader.style;
+  const cellStyle = useMemo<CSSProperties>(() => {
+    const color = rgbaWithOpacity(primaryColor, 1, primaryAlpha ?? 1);
+    const glowSize = shadow ? (dense ? glow * Math.min(1, renderCellSize / GLOW_REFERENCE_CELL) : glow) : 0;
+    return {
+      width: renderCellSize,
+      height: renderCellSize,
+      ...getCellShapeStyle({ style: { cellShape, innerRadius } } as LoaderComponent, renderCellSize),
+      ["--cell-color" as string]: color,
+      ["--cell-glow-color" as string]: color,
+      ["--cell-glow-size" as string]: `${glowSize}px`
+    };
+  }, [cellShape, dense, glow, innerRadius, primaryAlpha, primaryColor, renderCellSize, shadow]);
+  const inactiveBackground = useMemo(
+    () => rgbaWithOpacity(backgroundColor ?? "#2D3743", 1, backgroundAlpha ?? 1),
+    [backgroundAlpha, backgroundColor]
+  );
+  const className = `dot-grid__cell ${getCellShapeClassName(loader)}${variant === "canvas" ? " dot-grid__cell--canvas" : ""}`;
+  const cells = useMemo(() => Array.from({ length: rows * cols }, (_, index) => index), [rows, cols]);
 
   return (
     <div className={`dot-grid-editor-shell${variant === "canvas" ? " dot-grid-editor-shell--canvas" : ""}`}>
       <div
-        className={`dot-grid${variant === "canvas" ? " dot-grid--canvas" : ""}`}
+        className={`dot-grid${variant === "canvas" ? " dot-grid--canvas" : ""}${dense ? " dot-grid--dense" : ""}`}
         style={{
           gridTemplateColumns: `repeat(${cols}, ${renderCellSize}px)`,
           gap: renderGap,
-          padding:
-            variant === "canvas"
-              ? `${canvasMetrics.padding}px`
-              : undefined
+          padding: variant === "canvas" ? `${canvasMetrics.padding}px` : undefined
         }}
       >
-        {cells.map((cellIndex) => {
-          const active = loader.pattern.activeCells.includes(cellIndex);
-          return (
-            <button
-              key={cellIndex}
-              type="button"
-              data-dot-cell="true"
-              className={`dot-grid__cell ${getCellShapeClassName(loader)}${active ? " is-active" : ""}${variant === "canvas" ? " dot-grid__cell--canvas" : ""}`}
-              onClick={(event) => event.preventDefault()}
-              onPointerDown={() => handlePointerDown(cellIndex)}
-              onPointerEnter={() => handlePointerEnter(cellIndex)}
-              style={{
-                width: renderCellSize,
-                height: renderCellSize,
-                ...getCellShapeStyle(loader, renderCellSize),
-                background: active
-                  ? undefined
-                  : rgbaWithOpacity(loader.style.backgroundColor ?? "#2D3743", 1, loader.style.backgroundAlpha ?? 1),
-                ["--cell-color" as string]: rgbaWithOpacity(loader.style.primaryColor, 1, loader.style.primaryAlpha ?? 1),
-                ["--cell-glow-color" as string]: rgbaWithOpacity(
-                  loader.style.primaryColor,
-                  1,
-                  loader.style.primaryAlpha ?? 1
-                ),
-                ["--cell-glow-size" as string]: `${loader.style.shadow ? loader.style.glow : 0}px`
-              }}
-              aria-label={`Toggle cell ${cellIndex + 1}`}
-            />
-          );
-        })}
+        {cells.map((cellIndex) => (
+          <DotCell
+            key={cellIndex}
+            index={cellIndex}
+            active={activeCells.has(cellIndex)}
+            className={className}
+            style={cellStyle}
+            inactiveBackground={inactiveBackground}
+            onDown={handlePointerDown}
+            onEnter={handlePointerEnter}
+          />
+        ))}
       </div>
     </div>
   );

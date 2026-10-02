@@ -13,7 +13,14 @@ export type LiveStreamOptions = {
  */
 export type FramePush = (rgb: Uint8Array, stillWanted: () => boolean) => Promise<void>;
 
+/** Renders the frame that should be visible at a given time (ms, same clock as Date.now()). */
+export type FrameSource = (displayAt: number) => Uint8Array;
+
 const DEFAULT_MIN_INTERVAL_MS = 50;
+/** How often an unchanged source is re-sampled; keeps a static stretch of animation from spinning the CPU. */
+const UNCHANGED_POLL_MS = 16;
+/** Smoothing for the push-duration estimate used to sample frames at the moment they will light up. */
+const LATENCY_SMOOTHING = 0.2;
 const sameFrame = (a: Uint8Array | null, b: Uint8Array) => a !== null && a.length === b.length && a.every((v, i) => v === b[i]);
 
 /**
@@ -29,6 +36,8 @@ export class LiveFrameStream {
   private lastAt = 0;
   private generation = 0;
   private running: Promise<void> | null = null;
+  private source: FrameSource | null = null;
+  private pushMsEstimate = 0;
 
   constructor(push: FramePush, options: LiveStreamOptions = {}) {
     this.push = push;
@@ -38,12 +47,23 @@ export class LiveFrameStream {
 
   show(rgb: Uint8Array) {
     this.pending = rgb;
-    if (!this.running) this.running = this.pump().finally(() => { this.running = null; });
+    this.kick();
   }
 
-  /** Drops the waiting frame and tells an in-progress push to abandon its frame. */
+  /**
+   * Pull mode for animation: whenever the link is free, render the frame for the moment it will
+   * actually light up. Motion keeps real-time pace at whatever rate the link sustains, instead of
+   * dropping pre-rendered frames unevenly. Pass null to stop.
+   */
+  play(source: FrameSource | null) {
+    this.source = source;
+    if (source) this.kick();
+  }
+
+  /** Drops the waiting frame and source, and tells an in-progress push to abandon its frame. */
   cancel() {
     this.pending = null;
+    this.source = null;
     this.generation++;
   }
 
@@ -56,14 +76,31 @@ export class LiveFrameStream {
     while (this.running) await this.running;
   }
 
+  private kick() {
+    if (!this.running) this.running = this.pump().finally(() => { this.running = null; });
+  }
+
+  private nextFrame(): Uint8Array | null {
+    if (this.pending) {
+      const frame = this.pending;
+      this.pending = null;
+      return frame;
+    }
+    return this.source ? this.source(Date.now() + this.pushMsEstimate) : null;
+  }
+
   private async pump() {
-    while (this.pending) {
+    while (this.pending || this.source) {
       const generation = this.generation;
       const wait = this.lastAt + this.minIntervalMs - Date.now();
       if (wait > 0) await backgroundSleep(wait);
-      const frame = this.pending;
-      this.pending = null;
-      if (!frame || generation !== this.generation || sameFrame(this.lastSent, frame)) continue;
+      const frame = this.nextFrame();
+      if (!frame || generation !== this.generation) continue;
+      if (sameFrame(this.lastSent, frame)) {
+        if (this.source) await backgroundSleep(UNCHANGED_POLL_MS);
+        continue;
+      }
+      const startedAt = Date.now();
       try {
         await this.push(frame, () => generation === this.generation);
         if (generation === this.generation) this.lastSent = frame;
@@ -71,6 +108,7 @@ export class LiveFrameStream {
         this.onError?.(error instanceof Error ? error : new Error(String(error)));
       }
       this.lastAt = Date.now();
+      this.pushMsEstimate += (this.lastAt - startedAt - this.pushMsEstimate) * LATENCY_SMOOTHING;
     }
   }
 }

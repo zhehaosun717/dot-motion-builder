@@ -14,13 +14,14 @@ The editor runs entirely in the browser. It has no account system, backend API, 
 - Bottom-center Focus Canvas control that recenters all artboards and fits oversized layouts into view.
 - Custom loaders and frame-based sequence animations.
 - Direct cell drawing, plus Fill Grid and Clear Grid actions.
-- Square grids from 3×3 through 13×13.
+- Square grids from 3×3 through 32×32 (32×32 maps one cell to one LED of a 32×32 panel).
 - Six exposed cell shapes: Rounded, Square, Circle, Diamond, Hexagon, and Star.
 - 12 mask-safe motion presets with direction- and origin-aware controls where applicable.
 - Separate active-cell and inactive-cell animation styles.
 - Active and inactive colors with opacity controls.
 - Optional glow whose color follows the active color.
 - Chinese and English editor UI.
+- Sends animations to an iDotMatrix 32×32 Bluetooth LED panel: as a looping GIF, or live while you edit.
 - Self-contained Web and SwiftUI exports only—no SVG, Lottie, PNG sequence, SVGA, or project-code clutter.
 - Toolcraft-based inspector controls, sheets, selectors, switches, sliders, segmented controls, and color inputs.
 
@@ -168,6 +169,30 @@ See [PLATFORM-RENDER-QA.md](./PLATFORM-RENDER-QA.md) for the test matrix and mea
 - Nothing is uploaded by the application.
 - Clearing site data removes locally saved projects.
 - Cloud sync, accounts, collaboration, and version history are not currently included.
+
+## LED panel (iDotMatrix 32×32)
+
+The editor can drive an iDotMatrix 32×32 Bluetooth LED panel directly from desktop Chrome or Edge (Web Bluetooth); no vendor app is needed. Close the phone app first: the panel accepts one connection at a time.
+
+- **Export → iDotMatrix** renders the selected loader to 32×32 frames, encodes a looping GIF (shared palette, ≤ 40 KB) and uploads it with per-chunk acknowledgements. The panel keeps playing it after you disconnect.
+- **Live Sync** (top bar) streams every edit and the preview animation as single frames. Frames are sampled at the moment they will light up, so motion keeps real-time pace at whatever rate the link sustains (measured 40–50 fps for pixel-art frames).
+- **Mirror Screen** shows a screen, window or tab, letterboxed and colour-corrected for the LEDs.
+
+The protocol follows the hardware notes of the DeskDot project: GIFs go in 4 KiB chunks with a 16-byte header; live frames are PNGs in the panel's DIY mode. Live frames start with no inter-packet gap and back off automatically if the panel stops acknowledging.
+
+## Desktop app and agent display
+
+`pnpm desktop:dist` builds **Dot Matrix Studio**, a Windows app (`release/Dot Matrix Studio Setup <version>.exe`). It wraps the editor, sits in the tray, connects to the panel by itself and keeps the link while the window is closed.
+
+It also lets AI agents show what they are doing on the panel:
+
+- **MCP server** (`%APPDATA%Dot Matrix Studiomcpserver.cjs`, run with `node`) with five tools: `set_status` (idle, thinking, working, waiting, done, error, optional label), `set_mood` (an animated pixel face: neutral, happy, excited, love, proud, surprised, confused, sad, angry, sleepy, nervous), `show_text`, `draw_pixels` (palette grids, optionally animated) and `get_panel_state`. It starts the app if it is not running.
+- **Hook CLI** (`mcpcli.cjs`) for agent lifecycle hooks, e.g. `node cli.cjs status thinking --hook` on prompt submit and `status done --hook` when a turn ends. It always exits 0 within ~1.5 s and never starts the app. A mood an agent chose stays up for 12 s before hook updates may replace it; "thinking" and "waiting" always show.
+- Both talk to a local API on `127.0.0.1` (default port 47321) protected by a random token in `%APPDATA%Dot Matrix Studioagent-api.json`; requests must target a local Host and carry the token header, so web pages cannot drive the panel.
+
+Example MCP client entry: `{"command": "node", "args": ["%APPDATA%\Dot Matrix Studio\mcp\server.cjs"]}`.
+
+Scripts: `pnpm desktop:start` (build and run), `pnpm desktop:dist` (installer), `pnpm start:fast` (production web build on port 4321; much faster than `pnpm dev` on 32×32 grids).
 
 ## Development
 

@@ -1,14 +1,16 @@
 "use client";
 
 import { create } from "zustand";
+import { AgentScene, isAnimated, renderScene } from "@/lib/agent-display/scene";
 import { MATRIX_SIZE } from "@/lib/idotmatrix/constants";
-import { LiveFrameStream } from "@/lib/idotmatrix/live-stream";
+import { FrameSource, LiveFrameStream } from "@/lib/idotmatrix/live-stream";
 import { MatrixLink } from "@/lib/idotmatrix/matrix-link";
 import { encodePng } from "@/lib/idotmatrix/png-encoder";
 import { ScreenMirror, startScreenMirror } from "@/lib/idotmatrix/screen-mirror";
 import { connectMatrix, MatrixError, MatrixErrorKind } from "@/lib/idotmatrix/web-bluetooth";
 
-export type LiveSource = "off" | "editor" | "screen";
+/** "agent": scenes pushed by AI agents through the desktop app's API (status, mood, text, pixels). */
+export type LiveSource = "off" | "editor" | "screen" | "agent";
 
 export type MatrixStatus =
   | { kind: "idle" }
@@ -25,11 +27,20 @@ type MatrixState = {
   status: MatrixStatus;
   live: LiveSource;
   showInactive: boolean;
+  /** Desktop app: agents may drive the panel whenever you are not using live sync or mirroring. */
+  agentEnabled: boolean;
+  agentScene: AgentScene | null;
+  /** Why the last link ended: only a lost link (not your Disconnect) should be reconnected automatically. */
+  lastDisconnect: "manual" | "lost" | null;
   connect: () => Promise<MatrixLink | null>;
   sendGif: (gif: Uint8Array) => Promise<void>;
   setLive: (source: LiveSource) => Promise<void>;
   pushFrame: (rgb: Uint8Array) => void;
+  /** Streams an animation by sampling it whenever the link is free; null stops it. */
+  playFrames: (source: FrameSource | null) => void;
   setShowInactive: (value: boolean) => void;
+  showAgentScene: (scene: AgentScene) => void;
+  setAgentEnabled: (enabled: boolean) => void;
   disconnect: () => void;
 };
 
@@ -46,6 +57,8 @@ let stream: LiveFrameStream | null = null;
 let mirror: ScreenMirror | null = null;
 /** Bumped by every live-mode change; a screen picker that resolves after a newer change is discarded. */
 let liveRequest = 0;
+/** When the current agent scene was set; its animation time starts here. */
+let agentSince = 0;
 
 function stopMirror() {
   const active = mirror;
@@ -57,11 +70,34 @@ function stopMirror() {
 export const useMatrixStore = create<MatrixState>((set, get) => {
   const isCurrent = (link: MatrixLink) => get().link === link;
 
+  /** Puts the current agent scene on the panel; returns false when it cannot or should not. */
+  const playAgent = () => {
+    const { link, agentEnabled, agentScene } = get();
+    if (!link || !agentEnabled || !agentScene || !stream || link.uploading) return false;
+    stream.cancel();
+    stream.reset();
+    if (isAnimated(agentScene)) stream.play((displayAt) => renderScene(agentScene, displayAt - agentSince));
+    else stream.show(renderScene(agentScene, 0));
+    set({ live: "agent", status: { kind: "live", source: "agent" } });
+    return true;
+  };
+
+  /** Stops whatever is streaming without handing the panel back to the agent (e.g. before a GIF upload). */
+  const stopLive = () => {
+    liveRequest++;
+    stopMirror();
+    stream?.cancel();
+    set({ live: "off", status: get().link ? { kind: "connected" } : { kind: "idle" } });
+  };
+
   return {
     link: null,
     status: { kind: "idle" },
     live: "off",
     showInactive: true,
+    agentEnabled: false,
+    agentScene: null,
+    lastDisconnect: null,
 
     connect: async () => {
       set({ status: { kind: "connecting" } });
@@ -74,6 +110,7 @@ export const useMatrixStore = create<MatrixState>((set, get) => {
           set({
             link: null,
             live: "off",
+            lastDisconnect: "lost",
             status: closed.uploading ? { kind: "error", reason: "upload-failed", detail: "disconnected" } : { kind: "idle" }
           });
         });
@@ -88,7 +125,8 @@ export const useMatrixStore = create<MatrixState>((set, get) => {
             set({ live: "off", status: toErrorStatus(error, "upload-failed") });
           }
         });
-        set({ link, status: { kind: "connected" } });
+        set({ link, status: { kind: "connected" }, lastDisconnect: null });
+        playAgent();
         return link;
       } catch (error) {
         const cancelled = error instanceof MatrixError && error.kind === "cancelled";
@@ -98,7 +136,7 @@ export const useMatrixStore = create<MatrixState>((set, get) => {
     },
 
     sendGif: async (gif) => {
-      await get().setLive("off");
+      stopLive();
       // A frame still being encoded or waiting its turn would otherwise land after the GIF and replace it.
       stream?.cancel();
       await stream?.idle();
@@ -123,8 +161,9 @@ export const useMatrixStore = create<MatrixState>((set, get) => {
       const request = ++liveRequest;
       stopMirror();
       stream?.cancel();
-      if (source === "off") {
-        set({ live: "off", status: get().link ? { kind: "connected" } : { kind: "idle" } });
+      if (source === "off" || source === "agent") {
+        // Leaving live sync or mirroring hands the panel back to the agent display when it is on.
+        if (!playAgent()) set({ live: "off", status: get().link ? { kind: "connected" } : { kind: "idle" } });
         return;
       }
       // Both the device chooser and the screen picker need a fresh click, so live modes start
@@ -160,14 +199,36 @@ export const useMatrixStore = create<MatrixState>((set, get) => {
       if (get().live !== "off" && !get().link?.uploading) stream?.show(rgb);
     },
 
+    playFrames: (source) => {
+      if (!source) {
+        stream?.play(null);
+        return;
+      }
+      if (get().live !== "off" && !get().link?.uploading) stream?.play(source);
+    },
+
     setShowInactive: (value) => set({ showInactive: value }),
+
+    showAgentScene: (scene) => {
+      agentSince = Date.now();
+      set({ agentScene: scene });
+      // Your own live sync or mirroring keeps the panel; the scene shows once you stop them.
+      const live = get().live;
+      if (live === "off" || live === "agent") playAgent();
+    },
+
+    setAgentEnabled: (enabled) => {
+      set({ agentEnabled: enabled });
+      if (enabled && get().live === "off") playAgent();
+      if (!enabled && get().live === "agent") stopLive();
+    },
 
     disconnect: () => {
       liveRequest++;
       stopMirror();
       stream = null;
       get().link?.disconnect();
-      set({ link: null, live: "off", status: { kind: "idle" } });
+      set({ link: null, live: "off", status: { kind: "idle" }, lastDisconnect: "manual" });
     }
   };
 });

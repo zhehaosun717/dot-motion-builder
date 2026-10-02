@@ -16,7 +16,7 @@ const {encodePng} = require('../src/lib/idotmatrix/png-encoder.ts');
 const {buildImageFrame, isImageAck, DIY_MODE_ON, crc32} = require('../src/lib/idotmatrix/protocol.ts');
 const {MatrixLink} = require('../src/lib/idotmatrix/matrix-link.ts');
 const {LiveFrameStream} = require('../src/lib/idotmatrix/live-stream.ts');
-const {renderMatrixStill, getMatrixLayout} = require('../src/lib/idotmatrix/render-frames.ts');
+const {renderMatrixStill, renderMatrixAt, renderMatrixFrames, getMatrixLayout} = require('../src/lib/idotmatrix/render-frames.ts');
 const {screenPixelsToLed} = require('../src/lib/idotmatrix/screen-mirror.ts');
 
 const N = MATRIX_SIZE * MATRIX_SIZE;
@@ -24,23 +24,32 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 function decodePng(png) {
   assert.deepEqual([...png.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10], 'PNG signature');
-  let p = 8, width = 0, height = 0;
+  let p = 8, width = 0, height = 0, depth = 0, colorType = 0, palette = null;
   const idat = [];
   while (p < png.length) {
     const len = png.readUInt32BE(p), type = png.toString('latin1', p + 4, p + 8), data = png.subarray(p + 8, p + 8 + len);
     assert.equal(png.readUInt32BE(p + 8 + len), crc32(png.subarray(p + 4, p + 8 + len)), `${type} CRC`);
-    if (type === 'IHDR') { width = data.readUInt32BE(0); height = data.readUInt32BE(4); assert.deepEqual([...data.subarray(8)], [8, 2, 0, 0, 0], '8-bit RGB'); }
+    if (type === 'IHDR') { width = data.readUInt32BE(0); height = data.readUInt32BE(4); depth = data[8]; colorType = data[9]; assert.deepEqual([...data.subarray(10)], [0, 0, 0]); }
+    if (type === 'PLTE') palette = data;
     if (type === 'IDAT') idat.push(data);
     p += 12 + len;
     if (type === 'IEND') break;
   }
+  assert((colorType === 2 && depth === 8) || (colorType === 3 && [4, 8].includes(depth) && palette), `supported format (type ${colorType}, depth ${depth})`);
   const raw = zlib.inflateSync(Buffer.concat(idat));
+  const stride = colorType === 2 ? width * 3 : Math.ceil((width * depth) / 8);
   const rgb = new Uint8Array(width * height * 3);
   for (let y = 0; y < height; y++) {
-    assert.equal(raw[y * (width * 3 + 1)], 0, 'filter type none');
-    rgb.set(raw.subarray(y * (width * 3 + 1) + 1, (y + 1) * (width * 3 + 1)), y * width * 3);
+    const row = raw.subarray(y * (stride + 1) + 1, (y + 1) * (stride + 1));
+    assert.equal(raw[y * (stride + 1)], 0, 'filter type none');
+    for (let x = 0; x < width; x++) {
+      if (colorType === 2) { rgb.set(row.subarray(x * 3, x * 3 + 3), (y * width + x) * 3); continue; }
+      const index = depth === 8 ? row[x] : (row[x >> 1] >> (x & 1 ? 0 : 4)) & 15;
+      assert(index * 3 + 2 < palette.length, 'index inside the palette');
+      rgb.set(palette.subarray(index * 3, index * 3 + 3), (y * width + x) * 3);
+    }
   }
-  return {width, height, rgb};
+  return {width, height, rgb, colorType, depth};
 }
 
 function fakePanel({imageAcks = true, ackDelayMs = 5} = {}) {
@@ -83,6 +92,30 @@ async function main() {
   assert.deepEqual([decoded.width, decoded.height], [32, 32]);
   assert.deepEqual(decoded.rgb, rgb, 'PNG round-trips losslessly');
   assert(png.length < 4096, 'a 32x32 frame fits one upload chunk');
+  const wide = Uint8Array.from({length: N * 3}, (_, i) => [Math.floor(i / 3) & 255, Math.floor(i / 12) & 255, 77][i % 3]);
+  const wideDecoded = decodePng(Buffer.from(await encodePng(MATRIX_SIZE, MATRIX_SIZE, wide)));
+  assert.equal(wideDecoded.colorType, 2, 'more than 256 colours stays RGB');
+  assert.deepEqual(wideDecoded.rgb, wide);
+
+  // Editor frames use few colours: an indexed PNG is lossless and much smaller (fewer BLE packets).
+  const swatch = [[255, 107, 0], [10, 14, 18], [0, 0, 0], [120, 60, 0]];
+  const fewColours = Uint8Array.from({length: N * 3}, (_, i) => swatch[(Math.floor(i / 3) * 7 + (Math.floor(i / 96) % 3)) % 4][i % 3]);
+  const indexedDecoded = decodePng(Buffer.from(await encodePng(MATRIX_SIZE, MATRIX_SIZE, fewColours)));
+  assert.deepEqual([indexedDecoded.colorType, indexedDecoded.depth], [3, 4], '<=16 colours -> 4-bit palette PNG');
+  assert.deepEqual(indexedDecoded.rgb, fewColours, '4-bit palette PNG round-trips');
+  const many = Uint8Array.from({length: N * 3}, (_, i) => ((Math.floor(i / 3) % 200) * ((i % 3) + 1)) & 255);
+  const manyDecoded = decodePng(Buffer.from(await encodePng(MATRIX_SIZE, MATRIX_SIZE, many)));
+  assert.deepEqual([manyDecoded.colorType, manyDecoded.depth], [3, 8], '17-256 colours -> 8-bit palette PNG');
+  assert.deepEqual(manyDecoded.rgb, many, '8-bit palette PNG round-trips');
+  const wave = structuredClone(createMockProject().loaders[0]);
+  wave.pattern.activeCells = Array.from({length: 36}, (_, i) => i);
+  wave.animation = {...wave.animation, ...getDefaultMotionConfig('wave'), inactiveStyle: 'breathe'};
+  const editorFrame = renderMatrixFrames(createMockProject(), wave, {showInactive: true}).frames[3];
+  const rgbOnly = Buffer.from(await encodePng(MATRIX_SIZE, MATRIX_SIZE, editorFrame, {allowPalette: false}));
+  const paletted = Buffer.from(await encodePng(MATRIX_SIZE, MATRIX_SIZE, editorFrame));
+  assert.equal(decodePng(rgbOnly).colorType, 2, 'palette can be disabled');
+  assert.deepEqual(decodePng(paletted).rgb, editorFrame, 'editor frame survives the palette');
+  assert(paletted.length < rgbOnly.length, `palette PNG is smaller (${paletted.length} vs ${rgbOnly.length} B)`);
 
   // ------------------------------------------------------------ DIY image framing
   const small = Uint8Array.from({length: 300}, (_, i) => i & 255);
@@ -171,6 +204,68 @@ async function main() {
   failing.show(frameOf(1));
   await failing.idle();
   assert.deepEqual(errors, ['gone'], 'push errors are reported, not thrown');
+
+  // ------------------------------------------------------------ pacing by time since the last write
+  const timed = fakePanel();
+  const stamps = [];
+  const timedWrite = timed.gatt.write.writeValueWithoutResponse;
+  timed.gatt.write.writeValueWithoutResponse = async data => { stamps.push(Date.now()); return timedWrite(data); };
+  const pacedLink = new MatrixLink(timed.gatt, {...fast, packetGapMs: 40});
+  const longMessage = new Uint8Array(1200).fill(1);
+  longMessage.set([1200 & 255, 1200 >> 8], 0);
+  await pacedLink.send(longMessage);
+  assert(stamps.length === 3 && stamps[1] - stamps[0] >= 35 && stamps[2] - stamps[1] >= 35, `packets of one message stay paced (${stamps.map(t => t - stamps[0])})`);
+  await sleep(80);
+  const before = Date.now();
+  await pacedLink.send(DIY_MODE_ON);
+  assert(Date.now() - before < 25, `no gap is added when the link has been idle longer than the gap (${Date.now() - before} ms)`);
+
+  // ------------------------------------------------------------ adaptive frame packet gap
+  // Measured on the user's panel: frame packets need no gap (50 fps, no missed acks). Should a link drop
+  // them anyway (frame acks time out), the gap backs off towards the safe GIF value.
+  const bigFrame = Buffer.from(await encodePng(MATRIX_SIZE, MATRIX_SIZE, wide));
+  assert(buildImageFrame(bigFrame).length > 1018, 'test frame spans 3+ packets');
+  const adaptive = fakePanel({imageAcks: false});
+  const frameStamps = [];
+  const adaptiveWrite = adaptive.gatt.write.writeValueWithoutResponse;
+  adaptive.gatt.write.writeValueWithoutResponse = async data => { frameStamps.push(Date.now()); return adaptiveWrite(data); };
+  const adaptiveLink = new MatrixLink(adaptive.gatt, {...fast, packetGapMs: 30, framePacketGapMs: 0, frameAckTimeoutMs: 20});
+  await adaptiveLink.showFrame(bigFrame); // DIY + frame 1
+  const firstFrameSpan = frameStamps[frameStamps.length - 1] - frameStamps[1];
+  assert(firstFrameSpan < 20, `frame packets go out back to back (${firstFrameSpan} ms)`);
+  for (let i = 0; i < 4; i++) await adaptiveLink.showFrame(bigFrame); // acks never come: gap backs off
+  const lastPackets = frameStamps.slice(-3);
+  assert(lastPackets[1] - lastPackets[0] >= 10 && lastPackets[2] - lastPackets[1] >= 10, `gap grows after missed frame acks (${lastPackets.map(t => t - lastPackets[0])})`);
+
+  // ------------------------------------------------------------ pulled, time-sampled frames
+  const pulled = [];
+  const puller = new LiveFrameStream(async f => { pulled.push(f[0]); await sleep(15); }, {minIntervalMs: 0});
+  const startedAt = Date.now();
+  puller.play(at => Uint8Array.from({length: N * 3}, () => Math.floor((at - startedAt) / 10) % 256));
+  await sleep(200);
+  puller.play(null);
+  await puller.idle();
+  const settled = pulled.length;
+  await sleep(60);
+  assert.equal(pulled.length, settled, 'stopping the source stops pushes');
+  assert(settled >= 6, `frames keep flowing while a source plays (${settled})`);
+  assert(pulled.every((v, i) => i === 0 || v > pulled[i - 1]), `each push samples a later moment (${pulled.join(',')})`);
+
+  // ------------------------------------------------------------ frame at an arbitrary time
+  const timeline = structuredClone(createMockProject().loaders[0]);
+  timeline.pattern.activeCells = [0, 7, 14];
+  timeline.animation = {...timeline.animation, ...getDefaultMotionConfig('wave'), durationMs: 1000, fps: 20, speed: 1};
+  const tlFrames = renderMatrixFrames(createMockProject(), timeline, {showInactive: true}).frames;
+  assert.deepEqual(renderMatrixAt(createMockProject(), timeline, 0, {showInactive: true}), tlFrames[0], 'time 0 is the first frame');
+  assert.deepEqual(renderMatrixAt(createMockProject(), timeline, 1000 + 250, {showInactive: true}), tlFrames[5], 'time wraps around the cycle');
+  const seqA = structuredClone(timeline), seqB = structuredClone(timeline);
+  Object.assign(seqA, {id: 'a', sequenceId: 's', sequenceIndex: 0});
+  Object.assign(seqB, {id: 'b', sequenceId: 's', sequenceIndex: 1});
+  seqA.animation.fps = seqB.animation.fps = 4;
+  seqB.pattern.activeCells = [35];
+  const seqProject = createMockProject();
+  seqProject.loaders = [seqA, seqB];
+  assert.deepEqual(renderMatrixAt(seqProject, seqA, 300, {showInactive: false}), renderMatrixFrames(seqProject, seqA, {showInactive: false}).frames[1], 'sequences step at their own fps');
 
   // ------------------------------------------------------------ still frames + screen mirroring
   const loader = structuredClone(createMockProject().loaders[0]);

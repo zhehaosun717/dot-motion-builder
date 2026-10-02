@@ -23,6 +23,11 @@ export type MatrixLinkOptions = {
   frameAckTimeoutMs?: number;
   /** Entering DIY mode blanks the panel briefly; frames sent sooner can be lost. */
   diySettleMs?: number;
+  /**
+   * Starting gap between the packets of a live frame. The user's panel took gap-less frame packets at
+   * ~50 fps with no missed acks (2026-10-03); if frame acks start timing out the gap backs off towards packetGapMs.
+   */
+  framePacketGapMs?: number;
 };
 
 export type UploadResult = { chunks: number; missedAcks: number };
@@ -43,8 +48,10 @@ const DEFAULT_OPTIONS: Required<MatrixLinkOptions> = {
   packetSizes: DEFAULT_PACKET_SIZES,
   retryDelayMs: 50,
   frameAckTimeoutMs: 600,
-  diySettleMs: 400
+  diySettleMs: 400,
+  framePacketGapMs: 0
 };
+const FRAME_GAP_BACKOFF_MS = 6;
 
 const sleep = (ms: number) => backgroundSleep(ms);
 
@@ -59,9 +66,12 @@ export class MatrixLink {
   private wake: (() => void) | null = null;
   private busy = false;
   private readyAt = 0;
+  /** When the last packet went out: the gap is measured from here, so idle time (encoding, acks) counts. */
+  private lastWriteAt = 0;
   private mode: PanelMode = "unknown";
   private framesInFlight = 0;
   private staleImageAcks = 0;
+  private frameGapMs: number;
   private staleImageAcksUntil = 0;
   private queue: Promise<unknown> = Promise.resolve();
 
@@ -69,6 +79,7 @@ export class MatrixLink {
     this.gatt = gatt;
     this.name = gatt.name;
     this.options = { ...DEFAULT_OPTIONS, ...options };
+    this.frameGapMs = Math.min(this.options.framePacketGapMs, this.options.packetGapMs);
     gatt.notify.addEventListener("characteristicvaluechanged", this.onNotify);
   }
 
@@ -101,12 +112,14 @@ export class MatrixLink {
         this.mode = "diy";
         this.framesInFlight = 0;
       }
-      await this.writePacketed(buildImageFrame(png));
+      await this.writePacketed(buildImageFrame(png), undefined, this.frameGapMs);
       this.framesInFlight++;
       while (this.framesInFlight > MAX_FRAMES_IN_FLIGHT) {
         if (!(await this.waitFor(isImageAck, this.options.frameAckTimeoutMs))) {
           // Its ack may still turn up; it must not then release a newer frame early.
           this.staleImageAcks++;
+          // A lost ack can mean lost packets: give the panel more room between them.
+          this.frameGapMs = Math.min(this.options.packetGapMs, this.frameGapMs + FRAME_GAP_BACKOFF_MS);
           this.staleImageAcksUntil = Date.now() + LATE_ACK_GRACE_MS;
         }
         this.framesInFlight--;
@@ -157,7 +170,7 @@ export class MatrixLink {
    * Writes data in paced packets. A rejected write delivered nothing, so the same bytes are retried
    * with backoff; only a size that keeps failing before any full-size success is stepped down.
    */
-  private async writePacketed(data: Uint8Array, beforeLastPacket?: () => void) {
+  private async writePacketed(data: Uint8Array, beforeLastPacket?: () => void, gapMs = this.options.packetGapMs) {
     const sizes = this.options.packetSizes;
     let offset = 0;
     let failures = 0;
@@ -166,7 +179,9 @@ export class MatrixLink {
       const packet = data.slice(offset, offset + size);
       if (offset + packet.length === data.length) beforeLastPacket?.();
       try {
+        await sleep(this.lastWriteAt + gapMs - Date.now());
         await this.gatt.write.writeValueWithoutResponse(packet);
+        this.lastWriteAt = Date.now();
       } catch (error) {
         failures++;
         if (failures <= WRITE_RETRIES) {
@@ -181,7 +196,6 @@ export class MatrixLink {
       failures = 0;
       if (packet.length === size) this.packetSizeConfirmed = true;
       offset += packet.length;
-      await sleep(this.options.packetGapMs);
     }
   }
 

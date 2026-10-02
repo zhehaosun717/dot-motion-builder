@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { getDesktopBridge } from "@/lib/desktop-bridge";
 import { describeMatrixStatus, matrixCopy } from "@/lib/idotmatrix/matrix-copy";
 import { isWebBluetoothAvailable } from "@/lib/idotmatrix/web-bluetooth";
 import { Language } from "@/lib/ui-copy";
@@ -18,11 +19,18 @@ export function LiveMatrixControls({ language }: LiveMatrixControlsProps) {
   const status = useMatrixStore((state) => state.status);
   const connect = useMatrixStore((state) => state.connect);
   const setLive = useMatrixStore((state) => state.setLive);
+  const disconnect = useMatrixStore((state) => state.disconnect);
+  const agentEnabled = useMatrixStore((state) => state.agentEnabled);
+  const setAgentEnabled = useMatrixStore((state) => state.setAgentEnabled);
   const [supported, setSupported] = useState(false);
+  const [desktop, setDesktop] = useState(false);
   const copy = matrixCopy[language];
 
   // navigator only exists in the browser; checking after mount keeps server and client markup equal.
-  useEffect(() => setSupported(isWebBluetoothAvailable()), []);
+  useEffect(() => {
+    setSupported(isWebBluetoothAvailable());
+    setDesktop(Boolean(getDesktopBridge()));
+  }, []);
   if (!supported) return null;
 
   const busy = status.kind === "connecting" || status.kind === "picking" || status.kind === "uploading";
@@ -38,6 +46,20 @@ export function LiveMatrixControls({ language }: LiveMatrixControlsProps) {
 
   return (
     <>
+      {desktop ? (
+        <Button
+          type="button"
+          className={`toolbar-button${agentEnabled ? " is-live" : ""}`}
+          variant="outline"
+          size="default"
+          disabled={busy}
+          title={statusText}
+          aria-pressed={agentEnabled}
+          onClick={() => setAgentEnabled(!agentEnabled)}
+        >
+          {copy.agentDisplay}
+        </Button>
+      ) : null}
       <Button
         type="button"
         className={`toolbar-button${live === "editor" ? " is-live" : ""}`}
@@ -61,6 +83,9 @@ export function LiveMatrixControls({ language }: LiveMatrixControlsProps) {
         onClick={() => void setLive(live === "screen" ? "off" : "screen")}
       >
         {live === "screen" ? copy.liveScreenStop : copy.liveScreen}
+      </Button>
+      <Button type="button" className="toolbar-button" variant="outline" size="default" disabled={busy} title={statusText} onClick={disconnect}>
+        {copy.disconnect}
       </Button>
     </>
   );

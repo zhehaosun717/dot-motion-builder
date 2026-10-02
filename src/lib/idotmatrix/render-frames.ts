@@ -46,13 +46,19 @@ export function getMatrixLayout(rows: number, cols: number, size = MATRIX_SIZE):
   };
 }
 
+const frameRate = (loader: LoaderComponent) => clamp(Math.round(loader.animation.fps), 1, MAX_GIF_FPS);
+
+function sequenceOf(project: Project, loader: LoaderComponent) {
+  const sequence = project.loaders
+    .filter(item => item.sequenceId === loader.sequenceId)
+    .sort((a, b) => (a.sequenceIndex ?? 0) - (b.sequenceIndex ?? 0));
+  return sequence.length ? sequence : [loader];
+}
+
 function planFrames(project: Project, loader: LoaderComponent, maxFrames: number): FramePlan[] {
-  const fps = clamp(Math.round(loader.animation.fps), 1, MAX_GIF_FPS);
+  const fps = frameRate(loader);
   if (loader.sequenceId) {
-    const sequence = project.loaders
-      .filter(item => item.sequenceId === loader.sequenceId)
-      .sort((a, b) => (a.sequenceIndex ?? 0) - (b.sequenceIndex ?? 0));
-    const frames = (sequence.length ? sequence : [loader]).slice(0, maxFrames);
+    const frames = sequenceOf(project, loader).slice(0, maxFrames);
     return frames.map((item, i) => ({ loader: item, progress: i / frames.length, discrete: true, delayCs: Math.round(100 / fps) }));
   }
   const durationMs = getCycleDuration(loader);
@@ -130,6 +136,18 @@ function renderFrame(plan: FramePlan, showInactive: boolean) {
 /** The drawn pattern as it looks while editing: active cells fully lit, inactive dots at rest. */
 export function renderMatrixStill(loader: LoaderComponent, options: { showInactive: boolean }): Uint8Array {
   return renderFrame({ loader, progress: 0, discrete: true, delayCs: 0 }, options.showInactive);
+}
+
+/** The frame at elapsedMs into the (looping) animation, for live streaming at whatever rate the link allows. */
+export function renderMatrixAt(project: Project, loader: LoaderComponent, elapsedMs: number, options: { showInactive: boolean }): Uint8Array {
+  const elapsed = Math.max(0, elapsedMs);
+  if (loader.sequenceId) {
+    const frames = sequenceOf(project, loader).slice(0, MAX_GIF_FRAMES);
+    const index = Math.floor(elapsed / (1000 / frameRate(loader))) % frames.length;
+    return renderFrame({ loader: frames[index], progress: index / frames.length, discrete: true, delayCs: 0 }, options.showInactive);
+  }
+  const durationMs = getCycleDuration(loader);
+  return renderFrame({ loader, progress: (elapsed % durationMs) / durationMs, discrete: false, delayCs: 0 }, options.showInactive);
 }
 
 /** Samples the shared motion field into 32x32 RGB frames with per-frame GIF delays. */

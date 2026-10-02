@@ -5,6 +5,7 @@ import type { PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent }
 import { DotGridEditor } from "@/components/editor/dot-grid-editor";
 import { ExportPanel } from "@/components/editor/export-panel";
 import { LiveMatrixControls } from "@/components/editor/live-matrix-controls";
+import { useDesktopBridge } from "@/components/editor/use-desktop-bridge";
 import { useLiveEditorSync } from "@/components/editor/use-live-editor-sync";
 import { PreviewStage, SequencePreviewStage } from "@/components/editor/preview-stage";
 import { normalizeCellShape, shapeOptions } from "@/lib/cell-shapes";
@@ -326,6 +327,7 @@ export function EditorApp() {
   const [propertiesCollapsed, setPropertiesCollapsed] = useState(false);
   const [previewScope, setPreviewScope] = useState<"none" | "selected" | "all">("none");
   useLiveEditorSync(project, editingLoader, previewScope !== "none");
+  useDesktopBridge();
   const [language, setLanguage] = useState<Language>("cn");
   const [showZoomHud, setShowZoomHud] = useState(false);
   const [collapsedSections, setCollapsedSections] = useState({
@@ -390,12 +392,18 @@ export function EditorApp() {
       if (event.key === "Backspace" || event.key === "Delete") {
         event.preventDefault();
         deleteSelectedLoader();
+        return;
+      }
+      // Escape deselects (empty-canvas clicks no longer do); the export drawer handles its own Escape.
+      if (event.key === "Escape" && !isExportOpen) {
+        clearSelection();
+        setPreviewScope("none");
       }
     }
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [copySelectedLoader, deleteSelectedLoader, duplicateSelectedLoader, pasteLoader]);
+  }, [clearSelection, copySelectedLoader, deleteSelectedLoader, duplicateSelectedLoader, isExportOpen, pasteLoader]);
 
   const t = uiCopy[language];
   const canvasBounds = useMemo(() => {
@@ -501,11 +509,6 @@ export function EditorApp() {
 
   function selectCanvasLoader(loaderId: string) {
     selectLoader(loaderId);
-    setPreviewScope("none");
-  }
-
-  function clearCanvasSelection() {
-    clearSelection();
     setPreviewScope("none");
   }
 
@@ -698,15 +701,9 @@ export function EditorApp() {
     });
   }
 
+  // A click on empty canvas used to clear the selection, which hid the settings sidebar mid-edit.
+  // It now keeps the selection; Escape deselects instead (see the keydown effect).
   function endPan(event?: ReactPointerEvent<HTMLDivElement>) {
-    const panState = panStateRef.current;
-    const shouldClearSelection = Boolean(
-      event &&
-        panState &&
-        panState.pointerId === event.pointerId &&
-        !panState.moved &&
-        !((event.target as HTMLElement | null)?.closest("[data-artboard-id], [data-artboard-action='true']"))
-    );
     const activePointerId = panStateRef.current?.pointerId ?? dragArtboardRef.current?.pointerId;
     if (event && activePointerId !== undefined && event.currentTarget.hasPointerCapture(activePointerId)) {
       event.currentTarget.releasePointerCapture(activePointerId);
@@ -714,9 +711,6 @@ export function EditorApp() {
     panStateRef.current = null;
     dragArtboardRef.current = null;
     setIsPanning(false);
-    if (shouldClearSelection) {
-      clearCanvasSelection();
-    }
   }
 
   if (!hydrated) {

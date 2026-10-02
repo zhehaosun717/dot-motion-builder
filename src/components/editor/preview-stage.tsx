@@ -4,8 +4,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { getCanvasGridMetrics } from "@/lib/canvas-grid-metrics";
 import { getCellShapeClassName, getCellShapeStyle } from "@/lib/cell-shapes";
 import { rgbaWithOpacity } from "@/lib/colors";
-import { compileTimeline } from "@/lib/core/timeline";
-import { sampleMotion, sampleBackground } from "@/lib/core/motion-sampler";
+import { DenseCellCanvas } from "@/components/editor/dense-cell-canvas";
+import { getCycleDuration, sampleMotion, sampleBackground } from "@/lib/core/motion-sampler";
+import { LEGACY_MAX_GRID_SIZE } from "@/lib/grid-limits";
 import { LoaderComponent } from "@/types/dot-motion";
 
 type PreviewStageProps = {
@@ -80,7 +81,10 @@ export function SequencePreviewStage({ frames, showHint = true, isAnimated = tru
 }
 
 export function PreviewStage({ loader, showHint = true, isAnimated = true, variant = "default", staticOnly = false, backgroundProgress }: PreviewStageProps) {
-  const timeline = useMemo(() => compileTimeline(loader), [loader]);
+  // Only the duration and the active set are needed here; the full per-cell keyframe timeline is
+  // ~120 motion samples per active cell, which made every edit of a 32x32 grid expensive.
+  const durationMs = getCycleDuration(loader);
+  const activeCells = useMemo(() => new Set(loader.pattern.activeCells), [loader.pattern.activeCells]);
   const label = loader.text?.enabled ? loader.text.content : "";
   const [currentTimeMs, setCurrentTimeMs] = useState(0);
   const lastFrameRef = useRef(-1);
@@ -95,8 +99,8 @@ export function PreviewStage({ loader, showHint = true, isAnimated = true, varia
   const gridHeight = canvasVariant
     ? canvasMetrics.gridHeight
     : loader.pattern.grid.rows * cellSize + (loader.pattern.grid.rows - 1) * gap;
-  const displayTimeMs = staticOnly ? 0 : isAnimated ? currentTimeMs : timeline.durationMs * .25;
-  const backgroundPhase = backgroundProgress ?? displayTimeMs / timeline.durationMs;
+  const displayTimeMs = staticOnly ? 0 : isAnimated ? currentTimeMs : durationMs * .25;
+  const backgroundPhase = backgroundProgress ?? displayTimeMs / durationMs;
   const resetKey = [
     loader.pattern.grid.rows,
     loader.pattern.grid.cols,
@@ -113,8 +117,11 @@ export function PreviewStage({ loader, showHint = true, isAnimated = true, varia
     lastFrameRef.current = -1;
   }, [resetKey]);
 
+  // Grids beyond 13x13 draw on a canvas with their own animation loop.
+  const denseCanvas = canvasVariant && Math.max(loader.pattern.grid.rows, loader.pattern.grid.cols) > LEGACY_MAX_GRID_SIZE;
+
   useEffect(() => {
-    if (!isAnimated) {
+    if (!isAnimated || denseCanvas) {
       setCurrentTimeMs(0);
       lastFrameRef.current = -1;
       return;
@@ -125,7 +132,7 @@ export function PreviewStage({ loader, showHint = true, isAnimated = true, varia
     const startTime = performance.now();
 
     const tick = (now: number) => {
-      const elapsed = (now - startTime) % timeline.durationMs;
+      const elapsed = (now - startTime) % durationMs;
       const quantized = Math.floor(elapsed / frameMs) * frameMs;
 
       if (quantized !== lastFrameRef.current) {
@@ -138,9 +145,8 @@ export function PreviewStage({ loader, showHint = true, isAnimated = true, varia
 
     frameId = window.requestAnimationFrame(tick);
     return () => window.cancelAnimationFrame(frameId);
-  }, [isAnimated, loader.animation.fps, loader.pattern.grid.cols, loader.pattern.grid.rows, timeline.durationMs]);
+  }, [denseCanvas, isAnimated, loader.animation.fps, loader.pattern.grid.cols, loader.pattern.grid.rows, durationMs]);
 
-  const tracksByIndex = useMemo(() => new Map(timeline.tracks.map((track) => [track.cellIndex, track])), [timeline.tracks]);
   const totalCells = loader.pattern.grid.rows * loader.pattern.grid.cols;
   const denseGrid = totalCells >= 49;
   const secondaryColor = loader.style.secondaryColor ?? loader.style.primaryColor;
@@ -170,15 +176,25 @@ export function PreviewStage({ loader, showHint = true, isAnimated = true, varia
             height: gridHeight
           }}
         >
-          {Array.from({ length: totalCells }, (_, cellIndex) => {
-            const track = tracksByIndex.get(cellIndex);
-            const visual = staticOnly || !isAnimated ? {opacity: 1, scale: 1} : sampleMotion(loader, cellIndex, displayTimeMs / timeline.durationMs);
+          {denseCanvas ? (
+            <DenseCellCanvas
+              loader={loader}
+              cellSize={cellSize}
+              gap={gap}
+              width={gridWidth}
+              height={gridHeight}
+              isAnimated={isAnimated}
+              staticOnly={staticOnly}
+              backgroundProgress={isAnimated && !staticOnly ? backgroundProgress : backgroundPhase}
+            />
+          ) : Array.from({ length: totalCells }, (_, cellIndex) => {
+            const visual = staticOnly || !isAnimated ? {opacity: 1, scale: 1} : sampleMotion(loader, cellIndex, displayTimeMs / durationMs);
             const row = Math.floor(cellIndex / loader.pattern.grid.cols);
             const col = cellIndex % loader.pattern.grid.cols;
             const x = col * (cellSize + gap);
             const y = row * (cellSize + gap);
             const shapeStyle = getCellShapeStyle(loader, cellSize);
-            const active = Boolean(track);
+            const active = activeCells.has(cellIndex);
             const glow = loader.style.shadow ? loader.style.glow : 0;
             return (
 <span key={cellIndex} style={{position: "absolute", left: x, top: y, width: cellSize, height: cellSize}}>

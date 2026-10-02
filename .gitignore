@@ -17,3 +17,10 @@ coverage
 .gstack
 backups
 .vercel
+
+# desktop app build output
+
+desktop/dist
+desktop/build
+mcp/dist
+release

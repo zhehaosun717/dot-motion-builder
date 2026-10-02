@@ -16,6 +16,7 @@ export const matrixCopy = {
     liveEditorStop: "停止同步",
     liveScreen: "投屏",
     liveScreenStop: "停止投屏",
+    agentDisplay: "Agent 显示",
     overBudget: "GIF 超过 40 KB，屏幕播放可能会卡顿，可以减少序列帧数。",
     unsupported: "当前浏览器不支持 Web Bluetooth。请用桌面版 Chrome 或 Edge 打开，或先下载 GIF。"
   },
@@ -33,6 +34,7 @@ export const matrixCopy = {
     liveEditorStop: "Stop Sync",
     liveScreen: "Mirror Screen",
     liveScreenStop: "Stop Mirror",
+    agentDisplay: "Agent Display",
     overBudget: "GIF is over 40 KB and may play sluggishly; try fewer sequence frames.",
     unsupported: "This browser has no Web Bluetooth. Open the editor in desktop Chrome or Edge, or download the GIF."
   }
@@ -52,6 +54,7 @@ export function describeMatrixStatus(status: MatrixStatus, deviceName: string | 
       return cn ? "在浏览器弹窗里选择要投到屏上的屏幕、窗口或标签页…" : "Pick the screen, window or tab to mirror in the browser dialog…";
     case "live":
       if (status.source === "screen") return cn ? `正在投屏到 ${name}（最高约 15 帧/秒）` : `Mirroring to ${name} (up to ~15 fps)`;
+      if (status.source === "agent") return cn ? `${name} 正在显示 AI agent 的状态和心情` : `${name} is showing your AI agent's status and mood`;
       return cn ? `实时同步到 ${name}：画的每一笔、预览的动画都会直接显示在屏上` : `Live on ${name}: every edit and the preview animation show on the panel`;
     case "uploading":
       // Chrome throttles timers in background tabs, which stretches the paced upload to minutes.
