@@ -1,5 +1,7 @@
 # Dot Motion Builder
 
+**English** | [简体中文](./README.zh-CN.md)
+
 Dot Motion Builder is a local-first visual editor for designing dot-matrix loading animations and exporting production-ready Web and SwiftUI code.
 
 **Live editor:** [dot-motion-builder.vercel.app](https://dot-motion-builder.vercel.app/editor)
@@ -39,7 +41,7 @@ The inspector is organized into five focused sections:
 
 ### Grid
 
-- Grid size: 3×3 to 13×13
+- Grid size: 3×3 to 32×32
 - Cell shape
 - Cell gap: 0 to 20 px
 
@@ -186,11 +188,11 @@ The protocol follows the hardware notes of the DeskDot project: GIFs go in 4 KiB
 
 It also lets AI agents show what they are doing on the panel:
 
-- **MCP server** (`%APPDATA%Dot Matrix Studiomcpserver.cjs`, run with `node`) with five tools: `set_status` (idle, thinking, working, waiting, done, error, optional label), `set_mood` (an animated pixel face: neutral, happy, excited, love, proud, surprised, confused, sad, angry, sleepy, nervous), `show_text`, `draw_pixels` (palette grids, optionally animated) and `get_panel_state`. It starts the app if it is not running.
-- **Hook CLI** (`mcpcli.cjs`) for agent lifecycle hooks, e.g. `node cli.cjs status thinking --hook` on prompt submit and `status done --hook` when a turn ends. It always exits 0 within ~1.5 s and never starts the app. A mood an agent chose stays up for 12 s before hook updates may replace it; "thinking" and "waiting" always show.
-- Both talk to a local API on `127.0.0.1` (default port 47321) protected by a random token in `%APPDATA%Dot Matrix Studioagent-api.json`; requests must target a local Host and carry the token header, so web pages cannot drive the panel.
+- **MCP server** (`%APPDATA%\Dot Matrix Studio\mcp\server.cjs`, run with `node`) with five tools: `set_status` (idle, thinking, working, waiting, done, error, optional label), `set_mood` (an animated pixel face: neutral, happy, excited, love, proud, surprised, confused, sad, angry, sleepy, nervous), `show_text`, `draw_pixels` (palette grids, optionally animated) and `get_panel_state`. It starts the app if it is not running.
+- **Hook CLI** (`mcp\cli.cjs`) for agent lifecycle hooks, e.g. `node cli.cjs status thinking --hook` on prompt submit and `status done --hook` when a turn ends. It always exits 0 within ~1.5 s and never starts the app. A mood an agent chose stays up for 12 s before hook updates may replace it; "thinking" and "waiting" always show.
+- Both talk to a local API on `127.0.0.1` (default port 47321) protected by a random token in `%APPDATA%\Dot Matrix Studio\agent-api.json`; requests must target a local Host and carry the token header, so web pages cannot drive the panel.
 
-Example MCP client entry: `{"command": "node", "args": ["%APPDATA%\Dot Matrix Studio\mcp\server.cjs"]}`.
+Example MCP client entry: `{"command": "node", "args": ["%APPDATA%\\Dot Matrix Studio\\mcp\\server.cjs"]}`.
 
 Scripts: `pnpm desktop:start` (build and run), `pnpm desktop:dist` (installer), `pnpm start:fast` (production web build on port 4321; much faster than `pnpm dev` on 32×32 grids).
 
@@ -235,6 +237,8 @@ Individual checks:
 pnpm typecheck
 pnpm test:motion
 pnpm test:exports
+pnpm test:idotmatrix   # GIF/BLE framing, live streaming
+pnpm test:agent        # agent display, desktop API, MCP tools
 ```
 
 Browser-level checks live in `scripts/` and use Playwright. `scripts/platform-web-qa.mjs` validates real rendered pixels, clipping, continuous motion, and the 6 FPS sequence timeline.
@@ -247,10 +251,14 @@ src/
   components/editor/           Canvas, inspector, preview, and export UI
   lib/core/                    Shared motion sampling and timelines
   lib/exporters/               Web and SwiftUI generators
+  lib/idotmatrix/              LED panel: 32x32 rendering, GIF/PNG encoding, BLE protocol and link
+  lib/agent-display/           Agent moods, status icons, pixel font and scenes
   stores/                      Zustand editor state and persistence
   toolcraft/                   Toolcraft UI source used by the editor
   types/                       Core project and animation types
-scripts/                       Motion, export, browser, and platform QA
+desktop/src/                   Electron main process, local agent API, tray
+mcp/src/                       MCP server and hook CLI
+scripts/                       Motion, export, panel, desktop and MCP tests; desktop build
 ```
 
 ## Deployment
