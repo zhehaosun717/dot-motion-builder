@@ -43,8 +43,8 @@ export function LiveMatrixControls({ language }: LiveMatrixControlsProps) {
 
   /** Stores the animation being edited in the panel's own memory as a looping GIF. */
   function saveToPanel() {
-    const { showInactive, pixelGaps } = useMatrixStore.getState();
-    void sendGif(buildMatrixGif(project, loader, { showInactive, gaps: pixelGaps }).gif);
+    const { showInactive, pixelGaps, tuning } = useMatrixStore.getState();
+    void sendGif(buildMatrixGif(project, loader, { showInactive, gaps: pixelGaps, tuning }).gif);
   }
 
   if (!link) {

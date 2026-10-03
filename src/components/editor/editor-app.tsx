@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent } from "react";
-import { DotGridEditor } from "@/components/editor/dot-grid-editor";
+import { DotGridEditor, drawingPointerDowns } from "@/components/editor/dot-grid-editor";
+import { PanelTuningSection } from "@/components/editor/panel-tuning-section";
 import { ExportPanel } from "@/components/editor/export-panel";
 import { LiveMatrixControls } from "@/components/editor/live-matrix-controls";
 import { useDesktopBridge } from "@/components/editor/use-desktop-bridge";
@@ -10,7 +11,7 @@ import { useLiveEditorSync } from "@/components/editor/use-live-editor-sync";
 import { PreviewStage, SequencePreviewStage } from "@/components/editor/preview-stage";
 import { normalizeCellShape, shapeOptions } from "@/lib/cell-shapes";
 import { MAX_GRID_SIZE, MIN_SLIDER_GRID_SIZE } from "@/lib/grid-limits";
-import { DRAW_TOOLS, DrawTool } from "@/lib/grid-tools";
+import { DRAW_TOOLS, DrawTool, MAX_FILL_TOLERANCE } from "@/lib/grid-tools";
 import { importImageFile } from "@/lib/image-import";
 import { normalizeHexColor } from "@/lib/colors";
 
@@ -19,12 +20,12 @@ const DRAW_TOOL_KEYS: Record<string, DrawTool> = { b: "brush", e: "erase", r: "r
 const drawToolCopy = {
   cn: {
     label: "绘制工具", brush: "画笔 B", erase: "橡皮 E", rect: "矩形 R", fill: "填充 G",
-    brushColor: "画笔颜色（Alt+点击吸色）", importImage: "导入图片",
+    brushColor: "画笔颜色（Alt+点击吸色）", fillTolerance: "填充容差", importImage: "导入图片",
     importHint: "按当前网格缩放，32×32 时一格一像素", importFailed: "图片读取失败，换一张试试"
   },
   en: {
     label: "Draw tool", brush: "Brush B", erase: "Erase E", rect: "Rect R", fill: "Fill G",
-    brushColor: "Brush colour (Alt+click picks)", importImage: "Import Image",
+    brushColor: "Brush colour (Alt+click picks)", fillTolerance: "Fill tolerance", importImage: "Import Image",
     importHint: "Scaled to the grid; at 32×32 one cell is one pixel", importFailed: "Could not read that image"
   }
 } as const;
@@ -85,6 +86,7 @@ type CanvasArtboardProps = {
   brushColor: string;
   onApplyCells: (cells: number[], active: boolean, color?: string) => void;
   onPickColor: (hex: string) => void;
+  fillTolerance: number;
   onDuplicate: () => void;
   onDelete: () => void;
   canDelete: boolean;
@@ -103,6 +105,7 @@ function CanvasArtboard({
   brushColor,
   onApplyCells,
   onPickColor,
+  fillTolerance,
   onDuplicate,
   onDelete,
   canDelete,
@@ -180,6 +183,7 @@ function CanvasArtboard({
             brushColor={brushColor}
             onApplyCells={onApplyCells}
             onPickColor={onPickColor}
+            fillTolerance={fillTolerance}
             variant="canvas"
           />
         ) : (
@@ -312,6 +316,7 @@ export function EditorApp() {
   // null = paint with the active colour (no per-cell override), so the Active Color control keeps recolouring it.
   const [brushChoice, setBrushChoice] = useState<string | null>(null);
   const setBrushColor = (hex: string) => setBrushChoice(normalizeHexColor(hex));
+  const [fillTolerance, setFillTolerance] = useState(0);
   const [importError, setImportError] = useState<string | null>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
   const importCellsForLoader = useEditorStore((state) => state.importCellsForLoader);
@@ -363,7 +368,8 @@ export function EditorApp() {
     pattern: false,
     animation: false,
     colors: true,
-    effects: true
+    effects: true,
+    panel: true
   });
   const zoomHudTimeoutRef = useRef<number | null>(null);
   const panStateRef = useRef<{
@@ -661,6 +667,10 @@ export function EditorApp() {
   }
 
   function handleViewportPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
+    // The dot grid is drawing with this press and holds the pointer; dragging the artboard would steal it.
+    if (drawingPointerDowns.has(event.nativeEvent)) {
+      return;
+    }
     const target = event.target as HTMLElement;
     const artboard = target.closest("[data-artboard-id]") as HTMLElement | null;
     const hitDotCell = target.closest("[data-dot-cell='true']");
@@ -942,6 +952,7 @@ export function EditorApp() {
                   brushColor={brushChoice ?? item.style.primaryColor}
                   onApplyCells={(cells, active, color) => setCellsActiveForLoader(item.id, cells, active, color)}
                   onPickColor={setBrushColor}
+                  fillTolerance={fillTolerance}
                   onDuplicate={duplicateSelectedLoader}
                   onDelete={deleteSelectedLoader}
                   canDelete={
@@ -1007,6 +1018,9 @@ export function EditorApp() {
                       opacity={100}
                       onValueChange={({ hex }) => setBrushColor(hex)}
                     />
+                    {drawTool === "fill" ? (
+                      <SliderControl showFill name={drawToolCopy[language].fillTolerance} min={0} max={MAX_FILL_TOLERANCE} step={1} unit="%" value={fillTolerance} onValueChange={setFillTolerance} />
+                    ) : null}
                     <div className="image-import">
                       <Button type="button" variant="outline" size="default" onClick={() => importInputRef.current?.click()}>
                         {drawToolCopy[language].importImage}
@@ -1160,6 +1174,12 @@ export function EditorApp() {
                     />
                   </div>
                 </PanelSection>
+
+                <PanelTuningSection
+                  language={language}
+                  collapsed={collapsedSections.panel}
+                  onCollapsedChange={(value) => setCollapsedSections(current => ({ ...current, panel: value }))}
+                />
 
                 <PanelSection
                   title={t.effects}

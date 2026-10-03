@@ -8,7 +8,7 @@ const root = path.resolve(__dirname, '..');
 const resolve = Module._resolveFilename;
 Module._resolveFilename = function(name, ...args) {return resolve.call(this, name.startsWith('@/') ? path.join(root, 'src', name.slice(2)) : name, ...args);};
 require.extensions['.ts'] = (mod, filename) => mod._compile(ts.transpileModule(fs.readFileSync(filename, 'utf8'), {compilerOptions: {module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022}}).outputText, filename);
-const {cellsOnLine, cellsInRect, floodFill, cellAtPoint} = require('../src/lib/grid-tools.ts');
+const {cellsOnLine, cellsInRect, floodFill, floodFillWhere, colorsWithinTolerance, isPointOnCells, cellAtPoint} = require('../src/lib/grid-tools.ts');
 
 const cols = 8, rows = 8;
 const at = (r, c) => r * cols + c;
@@ -67,4 +67,27 @@ const still = structuredClone(createMockProject().loaders[0]);
 still.animation = {...still.animation, ...getDefaultMotionConfig('static')};
 for (const t of [0, 0.3, 0.77]) assert.deepEqual(sampleMotion(still, 5, t), {opacity: 1, scale: 1}, 'static never dims');
 
-console.log('PASS: editor tools — continuous strokes, rectangles, flood fill, pointer mapping.');
+// Fill tolerance: a per-channel difference in percent of 255; 0 is exact and keeps unlit cells apart.
+assert.equal(colorsWithinTolerance('#FF0000', '#FF0000', 0), true);
+assert.equal(colorsWithinTolerance('#FF0000', '#F00000', 0), false, 'tolerance 0 is an exact match');
+assert.equal(colorsWithinTolerance('#FF0000', '#F00000', 10), true, '15/255 is within 10%');
+assert.equal(colorsWithinTolerance('#FF0000', '#C00000', 10), false, '63/255 is not within 10%');
+assert.equal(colorsWithinTolerance(null, null, 0), true, 'unlit matches unlit');
+assert.equal(colorsWithinTolerance(null, '#000000', 0), false, 'tolerance 0 never mixes unlit and lit');
+assert.equal(colorsWithinTolerance(null, '#101010', 10), true, 'with tolerance, unlit counts as black');
+// A photo-like gradient row: exact fill stops at the first step, tolerance spreads along it.
+const shades = ['#200000', '#280000', '#300000', '#380000', '#900000', '#980000', '#A00000', '#A80000'];
+const colorAt = cell => (cell < cols ? shades[cell] : null);
+const fillRow = tolerance => floodFillWhere(0, rows, cols, cell => colorsWithinTolerance(colorAt(cell), colorAt(0), tolerance)).sort((a, b) => a - b);
+assert.deepEqual(fillRow(0), [0], 'exact fill takes one shade');
+assert.deepEqual(fillRow(10), [0, 1, 2, 3], 'tolerance fills the dark shades only');
+assert.deepEqual(floodFillWhere(at(4, 4), rows, cols, () => true).length, rows * cols, 'region covers the whole grid when everything belongs');
+
+// Presses in the padding around the cells belong to the artboard; gaps between cells belong to the grid.
+assert.equal(isPointOnCells(100 + 2 * (10 + 22), 50 + 2 * (10 + 5), geometry), true, 'a gap between cells is on the grid');
+assert.equal(isPointOnCells(100 + 2 * 3, 50 + 2 * (10 + 5), geometry), false, 'left padding is not');
+const gridExtent = cols * 20 + (cols - 1) * 4;
+assert.equal(isPointOnCells(100 + 2 * (10 + gridExtent + 1), 50 + 2 * (10 + 5), geometry), true, 'half a gap past the last cell still counts');
+assert.equal(isPointOnCells(100 + 2 * (10 + gridExtent + 6), 50 + 2 * (10 + 5), geometry), false, 'right padding is not');
+
+console.log('PASS: editor tools — continuous strokes, rectangles, flood fill with tolerance, pointer mapping.');

@@ -4,6 +4,7 @@ import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import { MatrixPreview } from "@/components/editor/matrix-preview";
 import { buildMatrixGif } from "@/lib/idotmatrix/build-gif";
 import { GIF_BUDGET_BYTES } from "@/lib/idotmatrix/constants";
+import { isNeutralTuning } from "@/lib/idotmatrix/panel-tuning";
 import { describeMatrixStatus, matrixCopy } from "@/lib/idotmatrix/matrix-copy";
 import { isWebBluetoothAvailable } from "@/lib/idotmatrix/web-bluetooth";
 import { sanitizeName } from "@/lib/exporters/utils";
@@ -45,6 +46,12 @@ export function MatrixExport({ language, onDownload }: MatrixExportProps) {
   const busy = status.kind === "connecting" || status.kind === "picking" || status.kind === "uploading";
   const sizeKb = (result.gif.length / 1024).toFixed(1);
 
+  /** The preview and download stay true to the design; only what goes to the panel is colour-corrected. */
+  function handleSend() {
+    const { tuning } = useMatrixStore.getState();
+    void sendGif(isNeutralTuning(tuning) ? result.gif : buildMatrixGif(project, loader, { showInactive, gaps, tuning }).gif);
+  }
+
   function handleDownload() {
     onDownload(new Blob([new Uint8Array(result.gif)], { type: "image/gif" }), `${sanitizeName(loader.name)}-32x32.gif`);
   }
@@ -71,7 +78,7 @@ export function MatrixExport({ language, onDownload }: MatrixExportProps) {
               {copy.disconnect}
             </Button>
           ) : null}
-          <Button type="button" variant="default" onClick={() => void sendGif(result.gif)} disabled={!supported || busy}>
+          <Button type="button" variant="default" onClick={handleSend} disabled={!supported || busy}>
             {link ? copy.send : copy.connectAndSend}
           </Button>
         </div>

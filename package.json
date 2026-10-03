@@ -2,7 +2,7 @@
   "name": "dot-motion-builder",
   "description": "A local-first visual editor for designing dot-matrix loading animations and exporting production-ready Web and SwiftUI code.",
   "private": true,
-  "version": "0.2.1",
+  "version": "0.2.2",
   "type": "module",
   "packageManager": "pnpm@11.25.0",
   "scripts": {

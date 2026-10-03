@@ -48,6 +48,11 @@ export function floodFill(
   keyOf: (cell: number) => string = (cell) => (active.has(cell) ? "on" : "off")
 ): number[] {
   const target = keyOf(start);
+  return floodFillWhere(start, rows, cols, (cell) => keyOf(cell) === target);
+}
+
+/** The 4-connected region around start of cells that belong to it (start is always included). */
+export function floodFillWhere(start: number, rows: number, cols: number, belongs: (cell: number) => boolean): number[] {
   const seen = new Set([start]);
   const queue = [start];
   for (let i = 0; i < queue.length; i++) {
@@ -55,12 +60,30 @@ export function floodFill(
     const r = rowOf(cell, cols), c = colOf(cell, cols);
     const neighbours = [r > 0 ? cell - cols : -1, r < rows - 1 ? cell + cols : -1, c > 0 ? cell - 1 : -1, c < cols - 1 ? cell + 1 : -1];
     for (const next of neighbours) {
-      if (next < 0 || seen.has(next) || keyOf(next) !== target) continue;
+      if (next < 0 || seen.has(next) || !belongs(next)) continue;
       seen.add(next);
       queue.push(next);
     }
   }
   return queue;
+}
+
+export const MAX_FILL_TOLERANCE = 100;
+
+/**
+ * Whether two cell colours count as the same area for the fill tool. null is an unlit cell, which is
+ * black on an LED panel. Tolerance 0..100 is the largest per-channel difference, as a percentage of 255
+ * (like an image editor's magic wand); 0 means identical, and keeps unlit and lit cells apart.
+ */
+export function colorsWithinTolerance(a: string | null, b: string | null, tolerance: number): boolean {
+  if (tolerance <= 0) return a === b;
+  const channels = (hex: string | null) => {
+    const value = hex ? Number.parseInt(hex.slice(1, 7), 16) : 0;
+    return [(value >> 16) & 255, (value >> 8) & 255, value & 255];
+  };
+  const [ca, cb] = [channels(a), channels(b)];
+  const limit = (Math.min(tolerance, MAX_FILL_TOLERANCE) / MAX_FILL_TOLERANCE) * 255;
+  return ca.every((channel, i) => Math.abs(channel - cb[i]) <= limit);
 }
 
 export type GridGeometry = {
@@ -75,6 +98,15 @@ export type GridGeometry = {
   rows: number;
   cols: number;
 };
+
+/** Whether a screen point lies on the cells (gaps between them included), not in the grid's padding. */
+export function isPointOnCells(clientX: number, clientY: number, g: GridGeometry): boolean {
+  const within = (screen: number, origin: number, count: number) => {
+    const local = (screen - origin) / g.scale - g.padding;
+    return local >= -g.gap / 2 && local <= count * g.cellSize + (count - 1) * g.gap + g.gap / 2;
+  };
+  return within(clientX, g.left, g.cols) && within(clientY, g.top, g.rows);
+}
 
 /** The cell under a screen point; points in gaps snap to the nearest cell, points outside clamp. */
 export function cellAtPoint(clientX: number, clientY: number, g: GridGeometry): number {

@@ -14,13 +14,14 @@ A Windows desktop app for the **iDotMatrix 32×32 Bluetooth LED panel**. No vend
 - **Live Sync**: every stroke and every preview animation shows on the panel immediately. Frames are sampled for the moment they light up; pixel-art frames stream at 40–50 fps.
 - **Mirror Screen**: pick a screen or window; it is scaled to 32×32 and colour-corrected for the LEDs.
 - **Save to Panel**: encodes the animation as a looping GIF in the panel's own memory, so it keeps playing after you disconnect.
+- **Panel colour**: brightness, contrast, saturation, gamma and warmth sliders correct only what is sent to the panel (live sync, mirroring, Save to Panel); the editor and exported files are untouched. Keep live sync on while you drag them to match your monitor; the settings are remembered.
 - **Chinese text**: a built-in 10px pixel font (all GB2312 simplified hanzi plus common traditional ones) fits 3 lines × 3 characters; longer text scrolls.
 
 ### Pixel animation editor
 
 - Grids from 3×3 to 32×32; at 32×32 one cell is one LED. Smaller grids scale up to fill the panel edge to edge, or with optional gaps for a dot-matrix look.
 - Drawing tools: **Brush (B)**, **Erase (E)**, **Rectangle (R)**, **Bucket fill (G)**. Fast strokes stay continuous.
-- **Multi-colour pixel art**: every cell can have its own colour. Pick a brush colour; Alt+click a cell to sample its colour; bucket fill stops at a different colour.
+- **Multi-colour pixel art**: every cell can have its own colour. Pick a brush colour; Alt+click a cell to sample its colour; bucket fill stops at a different colour, or raise **Fill tolerance** to take in similar shades of a photo at once.
 - **Import an image**: scaled to the grid without cropping (one pixel per cell at 32×32); transparent and near-black pixels stay off; keep drawing on top. Switches to the Static preset so it shows as is.
 - 12 motion presets (wave, sweep, radar, breathing, heartbeat, …) and frame sequences; colour, opacity, shape and glow controls.
 - Grids above 13×13 render on a canvas, so 32×32 editing and preview stay smooth.

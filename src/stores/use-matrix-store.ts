@@ -5,6 +5,7 @@ import { AgentScene, isAnimated, renderScene } from "@/lib/agent-display/scene";
 import { MATRIX_SIZE } from "@/lib/idotmatrix/constants";
 import { FrameSource, LiveFrameStream } from "@/lib/idotmatrix/live-stream";
 import { MatrixLink } from "@/lib/idotmatrix/matrix-link";
+import { applyPanelTuning, NEUTRAL_PANEL_TUNING, PanelTuning, sanitizePanelTuning } from "@/lib/idotmatrix/panel-tuning";
 import { encodePng } from "@/lib/idotmatrix/png-encoder";
 import { ScreenMirror, startScreenMirror } from "@/lib/idotmatrix/screen-mirror";
 import { connectMatrix, MatrixError, MatrixErrorKind } from "@/lib/idotmatrix/web-bluetooth";
@@ -29,6 +30,8 @@ type MatrixState = {
   showInactive: boolean;
   /** Dark line between scaled-up cells on the panel (off: blocks fill the panel edge to edge). */
   pixelGaps: boolean;
+  /** Colour correction applied to every frame and GIF sent to the panel (not to the editor or exports). */
+  tuning: PanelTuning;
   /** Desktop app: agents may drive the panel whenever you are not using live sync or mirroring. */
   agentEnabled: boolean;
   agentScene: AgentScene | null;
@@ -42,6 +45,7 @@ type MatrixState = {
   playFrames: (source: FrameSource | null) => void;
   setShowInactive: (value: boolean) => void;
   setPixelGaps: (value: boolean) => void;
+  setTuning: (patch: Partial<PanelTuning>) => void;
   showAgentScene: (scene: AgentScene) => void;
   setAgentEnabled: (enabled: boolean) => void;
   disconnect: () => void;
@@ -62,6 +66,28 @@ let mirror: ScreenMirror | null = null;
 let liveRequest = 0;
 /** When the current agent scene was set; its animation time starts here. */
 let agentSince = 0;
+/** The last frame handed to the stream, before tuning: re-sent when the tuning changes. */
+let lastLiveFrame: Uint8Array | null = null;
+
+const TUNING_STORAGE_KEY = "dot-matrix-panel-tuning";
+
+function loadTuning(): PanelTuning {
+  try {
+    const stored = typeof window === "undefined" ? null : window.localStorage.getItem(TUNING_STORAGE_KEY);
+    return stored ? sanitizePanelTuning(JSON.parse(stored)) : NEUTRAL_PANEL_TUNING;
+  } catch (error) {
+    console.warn("[iDotMatrix] ignoring unreadable panel tuning", error);
+    return NEUTRAL_PANEL_TUNING;
+  }
+}
+
+function saveTuning(tuning: PanelTuning) {
+  try {
+    window.localStorage.setItem(TUNING_STORAGE_KEY, JSON.stringify(tuning));
+  } catch (error) {
+    console.warn("[iDotMatrix] could not save panel tuning", error);
+  }
+}
 
 function stopMirror() {
   const active = mirror;
@@ -99,6 +125,7 @@ export const useMatrixStore = create<MatrixState>((set, get) => {
     live: "off",
     showInactive: true,
     pixelGaps: false,
+    tuning: loadTuning(),
     agentEnabled: false,
     agentScene: null,
     lastDisconnect: null,
@@ -119,9 +146,10 @@ export const useMatrixStore = create<MatrixState>((set, get) => {
           });
         });
         stream = new LiveFrameStream(async (rgb, stillWanted) => {
+          lastLiveFrame = rgb;
           // Plain RGB PNGs: indexed PNGs were acknowledged by the panel but showed black in live sync
           // (user report on v0.2.0), so the panel's decoder is only trusted with what v0.1 proved.
-          const png = await encodePng(MATRIX_SIZE, MATRIX_SIZE, rgb, { allowPalette: false });
+          const png = await encodePng(MATRIX_SIZE, MATRIX_SIZE, applyPanelTuning(rgb, get().tuning), { allowPalette: false });
           if (stillWanted()) await link.showFrame(png);
         }, {
           onError: (error) => {
@@ -219,6 +247,17 @@ export const useMatrixStore = create<MatrixState>((set, get) => {
 
     setShowInactive: (value) => set({ showInactive: value }),
     setPixelGaps: (value) => set({ pixelGaps: value }),
+
+    setTuning: (patch) => {
+      const tuning = sanitizePanelTuning({ ...get().tuning, ...patch });
+      set({ tuning });
+      saveTuning(tuning);
+      // A still picture would keep its old colours until the next edit: show it again with the new tuning.
+      if (stream && lastLiveFrame && get().live !== "off" && !get().link?.uploading) {
+        stream.reset();
+        stream.show(lastLiveFrame);
+      }
+    },
 
     showAgentScene: (scene) => {
       agentSince = Date.now();

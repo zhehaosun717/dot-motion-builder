@@ -6,7 +6,7 @@ import { getCellShapeClassName, getCellShapeStyle } from "@/lib/cell-shapes";
 import { getCanvasGridMetrics } from "@/lib/canvas-grid-metrics";
 import { rgbaWithOpacity } from "@/lib/colors";
 import { LEGACY_MAX_GRID_SIZE } from "@/lib/grid-limits";
-import { cellAtPoint, cellsInRect, cellsOnLine, DrawTool, floodFill } from "@/lib/grid-tools";
+import { cellAtPoint, cellsInRect, cellsOnLine, colorsWithinTolerance, DrawTool, floodFillWhere, GridGeometry, isPointOnCells } from "@/lib/grid-tools";
 import { LoaderComponent } from "@/types/dot-motion";
 
 type DotGridEditorProps = {
@@ -18,8 +18,16 @@ type DotGridEditorProps = {
   onApplyCells: (cells: number[], active: boolean, color?: string) => void;
   /** Alt+click picks a cell's colour (eyedropper). */
   onPickColor?: (hex: string) => void;
+  /** Fill tool: how different (0..100) a neighbouring colour may be and still be filled. */
+  fillTolerance?: number;
   variant?: "default" | "canvas";
 };
+
+/**
+ * Pointer presses the grid turned into drawing. The canvas underneath checks this so it does not also
+ * start dragging the artboard and steal the pointer — which used to drop rectangles started in a gap.
+ */
+export const drawingPointerDowns = new WeakSet<Event>();
 
 /** The cell size the original glow values were tuned for; dense grids scale their glow down from it. */
 const GLOW_REFERENCE_CELL = 22;
@@ -53,7 +61,7 @@ const DotCell = memo(function DotCell({ index, active, color, preview, className
   );
 });
 
-export function DotGridEditor({ loader, tool = "brush", brushColor, onApplyCells, onPickColor, variant = "default" }: DotGridEditorProps) {
+export function DotGridEditor({ loader, tool = "brush", brushColor, onApplyCells, onPickColor, fillTolerance = 0, variant = "default" }: DotGridEditorProps) {
   const { rows, cols, cellSize, gap } = loader.pattern.grid;
   const canvasMetrics = useMemo(() => getCanvasGridMetrics(loader), [loader]);
   const activeCells = useMemo(() => new Set(loader.pattern.activeCells), [loader.pattern.activeCells]);
@@ -68,14 +76,14 @@ export function DotGridEditor({ loader, tool = "brush", brushColor, onApplyCells
   const cellColors = loader.pattern.cellColors;
   const paintColor = (brushColor ?? loader.style.primaryColor).toUpperCase();
   const colorOf = (cell: number) => (cellColors?.[cell] ?? loader.style.primaryColor).toUpperCase();
-  const latest = useRef({ activeCells, onApplyCells, onPickColor, tool, rows, cols, renderCellSize, renderGap, paintColor, colorOf });
-  latest.current = { activeCells, onApplyCells, onPickColor, tool, rows, cols, renderCellSize, renderGap, paintColor, colorOf };
+  const latest = useRef({ activeCells, onApplyCells, onPickColor, tool, rows, cols, renderCellSize, renderGap, paintColor, colorOf, fillTolerance });
+  latest.current = { activeCells, onApplyCells, onPickColor, tool, rows, cols, renderCellSize, renderGap, paintColor, colorOf, fillTolerance };
 
-  const cellFromPointer = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+  const geometry = useCallback((): GridGeometry => {
     const grid = gridRef.current as HTMLDivElement;
     const box = grid.getBoundingClientRect();
     const current = latest.current;
-    return cellAtPoint(event.clientX, event.clientY, {
+    return {
       left: box.left,
       top: box.top,
       scale: box.width / (grid.offsetWidth || box.width || 1), // canvas zoom
@@ -84,11 +92,18 @@ export function DotGridEditor({ loader, tool = "brush", brushColor, onApplyCells
       gap: current.renderGap,
       rows: current.rows,
       cols: current.cols
-    });
+    };
   }, []);
+  const cellFromPointer = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => cellAtPoint(event.clientX, event.clientY, geometry()),
+    [geometry]
+  );
 
   const handlePointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
+    // A press on the padding around the cells is left to the canvas, which drags the artboard.
+    if (!isPointOnCells(event.clientX, event.clientY, geometry())) return;
+    drawingPointerDowns.add(event.nativeEvent);
     event.preventDefault();
     try {
       // Keeps the stroke when the pointer leaves the grid; harmless to skip if the pointer is already gone.
@@ -97,7 +112,7 @@ export function DotGridEditor({ loader, tool = "brush", brushColor, onApplyCells
       // no active pointer to capture (e.g. synthetic events)
     }
     const cell = cellFromPointer(event);
-    const { activeCells: active, onApplyCells: apply, onPickColor: pick, tool: currentTool, rows: r, cols: c, paintColor: paint, colorOf: color } = latest.current;
+    const { activeCells: active, onApplyCells: apply, onPickColor: pick, tool: currentTool, rows: r, cols: c, paintColor: paint, colorOf: color, fillTolerance: tolerance } = latest.current;
     if (event.altKey) {
       if (active.has(cell)) pick?.(color(cell)); // eyedropper
       return;
@@ -106,14 +121,15 @@ export function DotGridEditor({ loader, tool = "brush", brushColor, onApplyCells
     const alreadyPainted = active.has(cell) && color(cell) === paint;
     const value = currentTool === "erase" ? false : currentTool === "rect" ? true : !alreadyPainted;
     if (currentTool === "fill") {
-      const keyOf = (cellIndex: number) => (active.has(cellIndex) ? color(cellIndex) : "off");
-      apply(floodFill(cell, active, r, c, keyOf), value, paint);
+      const colorAt = (cellIndex: number) => (active.has(cellIndex) ? color(cellIndex) : null);
+      const target = colorAt(cell);
+      apply(floodFillWhere(cell, r, c, (cellIndex) => colorsWithinTolerance(colorAt(cellIndex), target, tolerance)), value, paint);
       return;
     }
     strokeRef.current = { pointerId: event.pointerId, value, start: cell, last: cell };
     if (currentTool === "rect") setRectPreview(new Set([cell]));
     else apply([cell], value, paint);
-  }, [cellFromPointer]);
+  }, [cellFromPointer, geometry]);
 
   const handlePointerMove = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     const stroke = strokeRef.current;
@@ -132,9 +148,10 @@ export function DotGridEditor({ loader, tool = "brush", brushColor, onApplyCells
     strokeRef.current = null;
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
     const { onApplyCells: apply, tool: currentTool, cols: c, paintColor: paint } = latest.current;
-    if (currentTool === "rect" && event.type === "pointerup") apply(cellsInRect(stroke.start, stroke.last, c), stroke.value, paint);
+    // The release point counts too: a quick drag can end before a pointermove reports the last cell.
+    if (currentTool === "rect" && event.type === "pointerup") apply(cellsInRect(stroke.start, cellFromPointer(event), c), stroke.value, paint);
     setRectPreview(null);
-  }, []);
+  }, [cellFromPointer]);
 
   const { primaryColor, primaryAlpha, backgroundColor, backgroundAlpha, shadow, glow, cellShape, innerRadius } = loader.style;
   const cellStyle = useMemo<CSSProperties>(() => {
@@ -172,6 +189,8 @@ export function DotGridEditor({ loader, tool = "brush", brushColor, onApplyCells
         onPointerMove={handlePointerMove}
         onPointerUp={endStroke}
         onPointerCancel={endStroke}
+        onLostPointerCapture={endStroke}
+        onDragStart={(event) => event.preventDefault()}
       >
         {cells.map((cellIndex) => (
           <DotCell

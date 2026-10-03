@@ -241,6 +241,35 @@ async function main() {
     checks++;
   }
 
+  // ------------------------------------------------------------ panel colour tuning
+  const {applyPanelTuning, sanitizePanelTuning, isNeutralTuning, NEUTRAL_PANEL_TUNING} = require('../src/lib/idotmatrix/panel-tuning.ts');
+  const tune = (rgb, patch) => Array.from(applyPanelTuning(Uint8Array.from(rgb), {...NEUTRAL_PANEL_TUNING, ...patch}));
+  const sample = Uint8Array.from([0, 0, 0, 128, 128, 128, 200, 60, 20]);
+  assert.equal(applyPanelTuning(sample, NEUTRAL_PANEL_TUNING), sample, 'neutral tuning is a no-op');
+  for (const patch of [{contrast: 50}, {warmth: -100}, {brightness: 200}, {gamma: 0.5}]) {
+    assert.deepEqual(tune([0, 0, 0], patch), [0, 0, 0], `black stays unlit with ${JSON.stringify(patch)}`);
+  }
+  const grey = tune([200, 60, 20], {saturation: 0});
+  assert(grey[0] === grey[1] && grey[1] === grey[2], 'saturation 0 makes grey');
+  const vivid = tune([200, 60, 20], {saturation: 150});
+  assert(vivid[0] > 200 && vivid[2] < 20, 'saturation above 100 spreads the channels');
+  assert.equal(tune([128, 128, 128], {gamma: 2.2})[0], Math.round(255 * (128 / 255) ** 2.2), 'gamma darkens midtones');
+  assert.deepEqual(tune([255, 255, 255], {gamma: 2.2}), [255, 255, 255], 'gamma keeps white');
+  const warm = tune([200, 200, 200], {warmth: 100});
+  assert(warm[0] === 200 && warm[2] < warm[1] && warm[1] < 200, 'warm cuts blue most, then green');
+  const cool = tune([200, 200, 200], {warmth: -100});
+  assert(cool[2] === 200 && cool[0] < 200, 'cool cuts red');
+  assert(tune([100, 100, 100], {contrast: 200})[0] < 100 && tune([180, 180, 180], {contrast: 200})[0] > 180, 'contrast spreads from mid grey');
+  assert.deepEqual(tune([100, 100, 100], {brightness: 50}), [50, 50, 50], 'brightness scales');
+  assert.deepEqual(sanitizePanelTuning({brightness: 999, gamma: 1.2000000000000002, warmth: 'x'}), {...NEUTRAL_PANEL_TUNING, brightness: 200, gamma: 1.2}, 'stored tuning is clamped and rounded');
+  assert.deepEqual(sanitizePanelTuning(null), NEUTRAL_PANEL_TUNING);
+  assert(isNeutralTuning(sanitizePanelTuning({})));
+  const tunedLoader = makeLoader(8, 'static');
+  const plainGif = buildMatrixGif(projectWith(tunedLoader), tunedLoader, {showInactive: false});
+  const tunedGif = buildMatrixGif(projectWith(tunedLoader), tunedLoader, {showInactive: false, tuning: {...NEUTRAL_PANEL_TUNING, gamma: 2.2}});
+  assert.deepEqual(pixel(plainGif.frames[0], 16, 16), [0xFF, 0x6B, 0x00]);
+  assert.deepEqual(pixel(tunedGif.frames[0], 16, 16), [255, Math.round(255 * (0x6B / 255) ** 2.2), 0], 'GIFs sent to the panel carry the tuning');
+
   // ------------------------------------------------------------ sequence mode
   const first = makeLoader(4, 'wave', [0]);
   first.sequenceId = 'seq'; first.sequenceIndex = 1; first.animation.fps = 5;
