@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   DEFAULT_IMPORT_OPTIONS,
   IMPORT_COLOR_CHOICES,
@@ -32,7 +32,8 @@ const copy = {
     blackCut: "暗部截断（更暗的像素不亮）",
     colors: "颜色数", allColors: "不限",
     dither: "抖动（减色时保留渐变）",
-    adjusting: (name: string) => `正在调整「${name}」：改上面的选项会重新套用`,
+    adjusting: (name: string) => `正在调整刚导入的「${name}」：改上面的选项会重新套用；做任何其他操作后就不再跟随`,
+    nextImport: "这些选项用于下一次导入（导入后、做其他操作前调整会实时套用到刚导入的图）",
     done: "完成"
   },
   en: {
@@ -44,7 +45,8 @@ const copy = {
     blackCut: "Black cut (darker pixels stay off)",
     colors: "Colours", allColors: "All",
     dither: "Dither (keeps gradients when reducing colours)",
-    adjusting: (name: string) => `Adjusting "${name}": changing the options above re-applies it`,
+    adjusting: (name: string) => `Adjusting the "${name}" you just imported: changing the options above re-applies it until you do anything else`,
+    nextImport: "These options are used for the next import (right after an import, until you do anything else, they re-apply live)",
     done: "Done"
   }
 } as const;
@@ -77,6 +79,26 @@ export function ImageImportControls({ language, loader }: ImageImportControlsPro
   const inputRef = useRef<HTMLInputElement>(null);
   const cacheRef = useRef<RasterCache | null>(null);
   const requestRef = useRef(0);
+  // Store changes made by this panel itself must not end live adjusting.
+  const ownEditRef = useRef(false);
+  const lastImportRef = useRef<LastImport | null>(null);
+  lastImportRef.current = lastImport;
+
+  /** Live adjusting ends as soon as anything else changes the drawing or the selected artboard. */
+  useEffect(() => useEditorStore.subscribe((state, previous) => {
+    if (ownEditRef.current || !lastImportRef.current) return;
+    const drawingChanged = state.project.loaders !== previous.project.loaders || state.project.assets !== previous.project.assets;
+    if (drawingChanged || state.selectedLoaderId !== previous.selectedLoaderId) setLastImport(null);
+  }), []);
+
+  function asOwnEdit<T>(edit: () => T): T {
+    ownEditRef.current = true;
+    try {
+      return edit();
+    } finally {
+      ownEditRef.current = false;
+    }
+  }
 
   async function rasterFor(file: File, rows: number, cols: number, fit: ImportFit) {
     const cached = cacheRef.current;
@@ -111,16 +133,19 @@ export function ImageImportControls({ language, loader }: ImageImportControlsPro
       const nextOptions = optionsRef.current;
       const frames = raster.frames.map((frame) => pixelsToCells(frame, rows, cols, nextOptions));
       if (previous && targets.length === frames.length) {
-        importCellsForLoaders(targets.map((target, index) => ({ ...target, ...frames[index] })));
+        asOwnEdit(() => importCellsForLoaders(targets.map((target, index) => ({ ...target, ...frames[index] }))));
       } else if (previous) {
         setLastImport(null);
       } else if (frames.length > 1) {
-        setLastImport({ file, targets: importSequence(gridSource.id, frames, raster.fps) });
+        setLastImport({ file, targets: asOwnEdit(() => importSequence(gridSource.id, frames, raster.fps)) });
       } else {
         // A picture lands on its own new layer, so it never replaces what is already drawn.
-        const layerId = importCellsForLoader(gridSource.id, frames[0].cells, frames[0].colors, { name: file.name.replace(/\.[^.]+$/, "") });
-        // Show the picture as is; only if that artboard is still the one selected after decoding.
-        if (useEditorStore.getState().selectedLoaderId === gridSource.id) setMotionPreset("static");
+        const layerId = asOwnEdit(() => {
+          const id = importCellsForLoader(gridSource.id, frames[0].cells, frames[0].colors, { name: file.name.replace(/\.[^.]+$/, "") });
+          // Show the picture as is; only if that artboard is still the one selected after decoding.
+          if (useEditorStore.getState().selectedLoaderId === gridSource.id) setMotionPreset("static");
+          return id;
+        });
         setLastImport({ file, targets: [{ loaderId: gridSource.id, layerId }] });
       }
       setStatus("idle");
@@ -178,7 +203,9 @@ export function ImageImportControls({ language, loader }: ImageImportControlsPro
           <span className="image-import__hint">{t.adjusting(lastImport.file.name)}</span>
           <Button type="button" variant="outline" size="default" onClick={() => setLastImport(null)}>{t.done}</Button>
         </div>
-      ) : null}
+      ) : (
+        <span className="image-import__hint">{t.nextImport}</span>
+      )}
     </div>
   );
 }
