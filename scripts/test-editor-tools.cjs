@@ -150,5 +150,17 @@ assert(hanzi.length > 20 && new Set(hanzi.map(c => Math.floor(c / 32))).size <= 
 const twoLines = textToCells('A\nB', 32, 32, 'small');
 assert.equal(new Set(twoLines.map(c => Math.floor(c / 32))).size, 10, 'line breaks make two lines');
 assert.deepEqual(textToCells('  \n ', 8, 8, 'large'), [], 'blank text draws nothing');
+// Enlarged text: every font pixel becomes a scale x scale block, still centred.
+const one = textToCells('7', 32, 32, 'small');
+const big = textToCells('7', 32, 32, 'small', 3);
+assert.equal(big.length, one.length * 9, '3x turns each pixel into a 3x3 block');
+const bigRows = big.map(c => Math.floor(c / 32)), bigCols = big.map(c => c % 32);
+assert.equal(Math.max(...bigRows) - Math.min(...bigRows) + 1, 15, '3x5 at 3x is 15 cells tall');
+assert.equal(Math.min(...bigRows), Math.floor((32 - 15) / 2), 'enlarged text is centred vertically');
+assert.equal(Math.min(...bigCols), Math.floor((32 - 9) / 2), 'and horizontally');
+assert.deepEqual(textToCells('7', 32, 32, 'small', 9), textToCells('7', 32, 32, 'small', 4), 'scale is capped per font');
+const wrapped = textToCells('1234', 32, 32, 'small', 4);
+assert(new Set(wrapped.map(c => Math.floor(c / 32))).size > 20, 'at 4x four digits wrap onto two lines');
+assert(wrapped.every(c => c >= 0 && c < 32 * 32), 'nothing spills outside the grid');
 
 console.log('PASS: editor tools — strokes, shapes, flood fill with tolerance, pointer mapping, transforms, image import, text.');

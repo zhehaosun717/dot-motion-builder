@@ -26,27 +26,46 @@ const FONTS: Record<TextFont, FontMetrics> = {
   }
 };
 
+/** Largest whole-number enlargement per font: the 10px font at 3x is already 30 cells tall. */
+export const MAX_TEXT_SCALE: Record<TextFont, number> = { large: 3, small: 4 };
+
+/** Lit pixels of one line drawn at 1x, left-aligned at the origin. */
+function linePixels(metrics: FontMetrics, line: string): Array<[number, number]> {
+  const canvas = new PixelCanvas();
+  metrics.draw(canvas, line, 0, 0);
+  const pixels: Array<[number, number]> = [];
+  for (let y = 0; y < metrics.height; y++) {
+    for (let x = 0; x < canvas.size; x++) if (canvas.rgb[(y * canvas.size + x) * 3] > 0) pixels.push([x, y]);
+  }
+  return pixels;
+}
+
 /**
- * The cells that spell out text, wrapped to the grid width and centred. Explicit line breaks are kept;
- * lines that do not fit below the grid are cut off.
+ * The cells that spell out text, wrapped to the grid width and centred. scale enlarges every font pixel
+ * to a scale x scale block (pixel fonts only scale by whole numbers). Explicit line breaks are kept;
+ * whatever does not fit the grid is cut off.
  */
-export function textToCells(text: string, rows: number, cols: number, font: TextFont): number[] {
+export function textToCells(text: string, rows: number, cols: number, font: TextFont, scale = 1): number[] {
   const metrics = FONTS[font];
-  const lines = text.split(/\r?\n/).flatMap((line) => (line.trim() ? metrics.wrap(line, cols) : [""]));
+  const factor = Math.max(1, Math.min(MAX_TEXT_SCALE[font], Math.round(scale)));
+  const wrapWidth = Math.max(1, Math.floor(cols / factor));
+  const lines = text.split(/\r?\n/).flatMap((line) => (line.trim() ? metrics.wrap(line, wrapWidth) : [""]));
   while (lines.length && !lines[lines.length - 1]) lines.pop();
   if (!lines.length) return [];
-  const blockHeight = lines.length * metrics.height + (lines.length - 1) * LINE_GAP;
+  const pitch = metrics.height + LINE_GAP;
+  const blockHeight = (lines.length * pitch - LINE_GAP) * factor;
   const top = Math.max(0, Math.floor((rows - blockHeight) / 2));
-  const canvas = new PixelCanvas();
+  const cells = new Set<number>();
   lines.forEach((line, i) => {
-    const left = Math.max(0, Math.floor((cols - metrics.measure(line)) / 2));
-    metrics.draw(canvas, line, left, top + i * (metrics.height + LINE_GAP));
-  });
-  const cells: number[] = [];
-  for (let y = 0; y < Math.min(rows, canvas.size); y++) {
-    for (let x = 0; x < Math.min(cols, canvas.size); x++) {
-      if (canvas.rgb[(y * canvas.size + x) * 3] > 0) cells.push(y * cols + x);
+    const left = Math.max(0, Math.floor((cols - metrics.measure(line) * factor) / 2));
+    for (const [x, y] of linePixels(metrics, line)) {
+      for (let dy = 0; dy < factor; dy++) {
+        for (let dx = 0; dx < factor; dx++) {
+          const row = top + (i * pitch + y) * factor + dy, col = left + x * factor + dx;
+          if (row < rows && col < cols) cells.add(row * cols + col);
+        }
+      }
     }
-  }
-  return cells;
+  });
+  return [...cells].sort((a, b) => a - b);
 }

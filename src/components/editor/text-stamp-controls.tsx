@@ -1,13 +1,14 @@
 "use client";
 
 import { useState } from "react";
-import type { TextFont } from "@/lib/text-cells";
+import { MAX_TEXT_SCALE, type TextFont } from "@/lib/text-cells";
 import { Language } from "@/lib/ui-copy";
 import { useDrawStore } from "@/stores/use-draw-store";
 import { useEditorStore } from "@/stores/use-editor-store";
 import { LoaderComponent } from "@/types/dot-motion";
 import { Button } from "@/toolcraft/ui/components/primitives/button";
 import { SegmentedControl } from "@/toolcraft/ui/components/controls/segmented/segmented-control";
+import { SliderControl } from "@/toolcraft/ui/components/controls/slider/slider-control";
 
 const MAX_TEXT_LENGTH = 200;
 
@@ -15,7 +16,7 @@ const copy = {
   cn: {
     label: "文字",
     placeholder: "输入文字，回车换行",
-    font: "字体", large: "10px 中文", small: "3×5 小字（英文数字）",
+    font: "字体", large: "10px 中文", small: "3×5 小字（英文数字）", scale: "字号（放大倍数）",
     stamp: "写到画布",
     hint: "用画笔颜色写在画面中间，可以再用方向键挪位置",
     failed: "文字渲染失败"
@@ -23,7 +24,7 @@ const copy = {
   en: {
     label: "Text",
     placeholder: "Type text; Enter for a new line",
-    font: "Font", large: "10px (Chinese)", small: "3×5 small (Latin, digits)",
+    font: "Font", large: "10px (Chinese)", small: "3×5 small (Latin, digits)", scale: "Size (enlargement)",
     stamp: "Write on Canvas",
     hint: "Written in the brush colour, centred; nudge it with the arrow keys",
     failed: "Could not render the text"
@@ -40,6 +41,9 @@ export function TextStampControls({ language, loader }: TextStampControlsProps) 
   const t = copy[language];
   const [text, setText] = useState("");
   const [font, setFont] = useState<TextFont>("large");
+  const [scale, setScale] = useState(1);
+  const maxScale = MAX_TEXT_SCALE[font];
+  const effectiveScale = Math.min(scale, maxScale);
   const [failed, setFailed] = useState(false);
   const setCellsActiveForLoader = useEditorStore((state) => state.setCellsActiveForLoader);
   const brushChoice = useDrawStore((state) => state.brushChoice);
@@ -50,7 +54,7 @@ export function TextStampControls({ language, loader }: TextStampControlsProps) 
       // The Chinese font is ~170 KB, so it loads only when text is first written.
       const { textToCells } = await import("@/lib/text-cells");
       const { rows, cols } = loader.pattern.grid;
-      const cells = textToCells(text, rows, cols, font);
+      const cells = textToCells(text, rows, cols, font, effectiveScale);
       const color = brushChoice ?? loader.style.primaryColor;
       if (cells.length) {
         setCellsActiveForLoader(loader.id, cells, true, color);
@@ -81,6 +85,18 @@ export function TextStampControls({ language, loader }: TextStampControlsProps) 
         value={font}
         options={[{ value: "large", label: t.large }, { value: "small", label: t.small }]}
         onValueChange={(value) => setFont(value === "small" ? "small" : "large")}
+      />
+      <SliderControl
+        showFill
+        variant="discrete"
+        markerCount={maxScale}
+        name={t.scale}
+        min={1}
+        max={maxScale}
+        step={1}
+        unit="×"
+        value={effectiveScale}
+        onValueChange={setScale}
       />
       <div className="image-import">
         <Button type="button" variant="outline" size="default" disabled={!text.trim()} onClick={() => void stamp()}>{t.stamp}</Button>

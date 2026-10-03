@@ -24,7 +24,7 @@ A Windows desktop app for the **iDotMatrix 32×32 Bluetooth LED panel**. No vend
 - **Undo / redo**: Ctrl+Z and Ctrl+Y (or Ctrl+Shift+Z), up to 100 steps; a stroke, a fill or a slider drag is one step.
 - **Multi-colour pixel art**: every cell can have its own colour. Pick a brush colour; recently used colours appear as swatches; the eyedropper or Alt+click samples a cell. Bucket fill takes the connected area of one colour; raise **Fill tolerance** to take in similar shades of a photo, or turn off **Connected area only** to replace a colour everywhere.
 - **Move the drawing**: arrow keys or buttons shift it by one cell; flip it horizontally or vertically; rotate it 90° either way.
-- **Text**: writes text in the built-in pixel fonts (10px with Chinese, or a 3×5 small font), centred, with line breaks; nudge it into place with the arrow keys.
+- **Text**: writes text in the built-in pixel fonts (10px with Chinese, or a 3×5 small font), centred, with line breaks and a size slider that enlarges them by whole steps (up to 3× for Chinese, 4× for the small font); nudge it into place with the arrow keys.
 - **Import images and animations**: scaled to the grid (one pixel per cell at 32×32), either whole or filling the grid with cropping; **Black cut** sets how dark a pixel may be and still stay off; optionally reduce to 32/16/8/4/2 colours with dithering. The options re-apply live to the last import. Animated GIF/WebP files become sequence frames (up to 24, at the original speed).
 - **Library**: save the current drawing (with its colours) and load it into any artboard later from a thumbnail.
 - 12 motion presets (wave, sweep, radar, breathing, heartbeat, …) and frame sequences; colour, opacity, shape and glow controls.
