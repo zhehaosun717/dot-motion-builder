@@ -90,6 +90,7 @@ function saveTuning(tuning: PanelTuning) {
 }
 
 function stopMirror() {
+  lastLiveFrame = null;
   const active = mirror;
   mirror = null;
   active?.stop();

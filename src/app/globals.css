@@ -2618,3 +2618,20 @@ select {
 .dot-grid--tool-pick .dot-grid__cell {
   cursor: cell;
 }
+
+/* Shown while the project cannot be saved (browser storage full). */
+.save-status-banner {
+  position: fixed;
+  top: 64px;
+  left: 50%;
+  z-index: 50;
+  max-width: min(560px, calc(100vw - 32px));
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: #5a1d1d;
+  color: #ffe3e3;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  transform: translateX(-50%);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}

@@ -15,6 +15,7 @@ import { GridTransform } from "@/lib/grid-transforms";
 import { DRAW_TOOL_KEYS, DrawingTools } from "@/components/editor/drawing-tools";
 import { ImageImportControls } from "@/components/editor/image-import-controls";
 import { PatternLibrarySection } from "@/components/editor/pattern-library-section";
+import { SaveStatusBanner } from "@/components/editor/save-status-banner";
 import { TextStampControls } from "@/components/editor/text-stamp-controls";
 import { redo, undo, useEditorHistory } from "@/stores/editor-history";
 import { useDrawStore } from "@/stores/use-draw-store";
@@ -65,8 +66,8 @@ const directionControlCells = [
 ];
 
 const ARROW_NUDGES: Record<string, GridTransform> = { ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up", ArrowDown: "down" };
-/** Focused widgets that move their own selection with the arrow keys. */
-const ARROW_KEY_WIDGETS = "[role='radiogroup'], [role='radio'], [role='slider'], [role='listbox'], [role='menu'], [role='tablist'], [role='combobox']";
+/** Focused widgets that move their own focus or selection with the arrow keys (segmented controls are role=group). */
+const ARROW_KEY_WIDGETS = "[role='group'], [role='radiogroup'], [role='radio'], [role='slider'], [role='listbox'], [role='menu'], [role='tablist'], [role='combobox']";
 
 type CanvasArtboardProps = {
   loader: LoaderComponent;
@@ -399,7 +400,7 @@ export function EditorApp() {
       }
       // Arrow keys nudge the drawing, unless a control that uses arrows itself has focus.
       const nudge = ARROW_NUDGES[event.key];
-      if (nudge && !modifier && !event.altKey && !(target instanceof Element && target.closest(ARROW_KEY_WIDGETS))) {
+      if (nudge && !modifier && !event.altKey && !event.defaultPrevented && !(target instanceof Element && target.closest(ARROW_KEY_WIDGETS))) {
         const { selectedLoaderId: loaderId } = useEditorStore.getState();
         if (loaderId) {
           event.preventDefault();
@@ -815,6 +816,7 @@ export function EditorApp() {
         </div>
       </div>
 
+      <SaveStatusBanner language={language} />
       <div className={`zoom-hud${showZoomHud ? " is-visible" : ""}`}>{Math.round(canvas.zoom * 100)}%</div>
       <div className="language-switch" aria-label="Language switch">
         <SegmentedControl

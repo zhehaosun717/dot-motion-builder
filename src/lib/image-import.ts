@@ -135,6 +135,7 @@ function rasterize(source: CanvasImageSource, width: number, height: number, row
 
 type DecodedFrame = { image: CanvasImageSource & { displayWidth: number; displayHeight: number; duration: number | null; close(): void } };
 type ImageDecoderLike = {
+  completed: Promise<void>;
   tracks: { ready: Promise<void>; selectedTrack: { frameCount: number } | null };
   decode(options: { frameIndex: number }): Promise<DecodedFrame>;
   close(): void;
@@ -150,7 +151,9 @@ async function rasterizeAnimation(file: File, rows: number, cols: number, fit: I
   if (!Decoder || !(await Decoder.isTypeSupported(file.type))) return null;
   const decoder = new Decoder({ data: await file.arrayBuffer(), type: file.type });
   try {
+    // frameCount can still grow until the whole file is parsed.
     await decoder.tracks.ready;
+    await decoder.completed;
     const frameCount = decoder.tracks.selectedTrack?.frameCount ?? 1;
     if (frameCount < 2) return null;
     const frames: Uint8ClampedArray[] = [];

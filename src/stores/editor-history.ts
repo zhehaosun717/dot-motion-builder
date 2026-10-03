@@ -45,7 +45,8 @@ function restore(target: Project) {
   const { project: current, selectedLoaderId } = useEditorStore.getState();
   // Keep the current view; the selection falls back to the first artboard if it no longer exists.
   const project = { ...target, canvas: current.canvas };
-  const selected = project.loaders.some((loader) => loader.id === selectedLoaderId) ? selectedLoaderId : project.loaders[0]?.id ?? "";
+  const stillThere = !selectedLoaderId || project.loaders.some((loader) => loader.id === selectedLoaderId);
+  const selected = stillThere ? selectedLoaderId : project.loaders[0]?.id ?? "";
   restoring = true;
   try {
     useEditorStore.setState({ project, selectedLoaderId: selected });
@@ -107,6 +108,11 @@ function install() {
   };
   window.addEventListener("pointerup", endGesture, true);
   window.addEventListener("pointercancel", endGesture, true);
+  // A release can be missed (outside the window, focus lost mid-drag); never let a gesture stay open.
+  window.addEventListener("blur", endGesture);
+  window.addEventListener("pointermove", (event) => {
+    if (event.buttons === 0) endGesture();
+  }, true);
 }
 
 /** Starts recording edits (once per app). */

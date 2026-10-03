@@ -44,6 +44,8 @@ type EditorState = {
   setCellsActiveForLoader: (loaderId: string, cells: number[], active: boolean, color?: string) => void;
   /** Replaces a loader's lit cells and colours, e.g. from an imported image. */
   importCellsForLoader: (loaderId: string, cells: number[], colors: Record<string, string>) => void;
+  /** Replaces several loaders' drawings in one update and one save (re-applying a GIF import). */
+  importCellsForLoaders: (entries: Array<{ loaderId: string; cells: number[]; colors: Record<string, string> }>) => void;
   /** Moves, mirrors or rotates a loader's whole drawing. */
   transformLoaderCells: (loaderId: string, op: GridTransform) => void;
   /**
@@ -825,6 +827,25 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     set({ project, selectedLoaderId: created[0].id });
     return created.map((loader) => loader.id);
   },
+  importCellsForLoaders: (entries) =>
+    set((state) => {
+      const byId = new Map(entries.map((entry) => [entry.loaderId, entry]));
+      const project = {
+        ...state.project,
+        updatedAt: new Date().toISOString(),
+        loaders: state.project.loaders.map((loader, index) => {
+          const entry = byId.get(loader.id);
+          if (!entry) return loader;
+          return normalizeLoader({
+            ...loader,
+            pattern: { ...loader.pattern, activeCells: sanitizeActiveCells(entry.cells, loader.pattern.grid), cellColors: entry.colors }
+          }, index);
+        })
+      };
+
+      saveProject(project);
+      return { project };
+    }),
   importCellsForLoader: (loaderId, cells, colors) =>
     set((state) => {
       const project = updateLoaderById(state.project, loaderId, (loader) => ({

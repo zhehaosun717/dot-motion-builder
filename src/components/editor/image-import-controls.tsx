@@ -64,9 +64,12 @@ type ImageImportControlsProps = {
 export function ImageImportControls({ language, loader }: ImageImportControlsProps) {
   const t = copy[language];
   const importCellsForLoader = useEditorStore((state) => state.importCellsForLoader);
+  const importCellsForLoaders = useEditorStore((state) => state.importCellsForLoaders);
   const importSequence = useEditorStore((state) => state.importSequence);
   const setMotionPreset = useEditorStore((state) => state.setMotionPreset);
   const [options, setOptions] = useState<ImportOptions>(DEFAULT_IMPORT_OPTIONS);
+  // Read when a slow first import finishes, so options changed while it loaded still apply.
+  const optionsRef = useRef(options);
   const [lastImport, setLastImport] = useState<LastImport | null>(null);
   const [status, setStatus] = useState<"idle" | "busy" | "failed">("idle");
   const inputRef = useRef<HTMLInputElement>(null);
@@ -82,19 +85,33 @@ export function ImageImportControls({ language, loader }: ImageImportControlsPro
   }
 
   /** First import (no previous targets) creates or fills artboards; later runs re-apply onto the same ones. */
-  async function run(file: File, nextOptions: ImportOptions, previous: string[] | null) {
+  async function run(file: File, previous: string[] | null) {
     const request = ++requestRef.current;
     const loaders = useEditorStore.getState().project.loaders;
     const targets = previous?.filter((id) => loaders.some((item) => item.id === id)) ?? [];
+    if (previous && targets.length !== previous.length) {
+      // Some imported artboards were deleted or undone: never re-apply onto whatever is selected now.
+      setLastImport(null);
+      return;
+    }
     const gridSource = loaders.find((item) => item.id === targets[0]) ?? loader;
     const { rows, cols } = gridSource.pattern.grid;
     setStatus("busy");
     try {
-      const raster = await rasterFor(file, rows, cols, nextOptions.fit);
+      let fit = optionsRef.current.fit;
+      let raster = await rasterFor(file, rows, cols, fit);
+      // The fit may have been changed while a first import was still decoding.
+      while (fit !== optionsRef.current.fit) {
+        fit = optionsRef.current.fit;
+        raster = await rasterFor(file, rows, cols, fit);
+      }
       if (request !== requestRef.current) return; // a newer change superseded this one
+      const nextOptions = optionsRef.current;
       const frames = raster.frames.map((frame) => pixelsToCells(frame, rows, cols, nextOptions));
       if (previous && targets.length === frames.length) {
-        targets.forEach((id, index) => importCellsForLoader(id, frames[index].cells, frames[index].colors));
+        importCellsForLoaders(targets.map((loaderId, index) => ({ loaderId, ...frames[index] })));
+      } else if (previous) {
+        setLastImport(null);
       } else if (frames.length > 1) {
         setLastImport({ file, targets: importSequence(gridSource.id, frames, raster.fps) });
       } else {
@@ -111,9 +128,10 @@ export function ImageImportControls({ language, loader }: ImageImportControlsPro
   }
 
   function changeOptions(patch: Partial<ImportOptions>) {
-    const next = { ...options, ...patch };
+    const next = { ...optionsRef.current, ...patch };
+    optionsRef.current = next;
     setOptions(next);
-    if (lastImport) void run(lastImport.file, next, lastImport.targets);
+    if (lastImport) void run(lastImport.file, lastImport.targets);
   }
 
   const hint = status === "busy" ? t.importing : status === "failed" ? t.importFailed : t.importHint;
@@ -133,7 +151,7 @@ export function ImageImportControls({ language, loader }: ImageImportControlsPro
           onChange={(event) => {
             const file = event.target.files?.[0];
             event.target.value = "";
-            if (file) void run(file, options, null);
+            if (file) void run(file, null);
           }}
         />
       </div>
