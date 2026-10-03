@@ -90,4 +90,65 @@ const gridExtent = cols * 20 + (cols - 1) * 4;
 assert.equal(isPointOnCells(100 + 2 * (10 + gridExtent + 1), 50 + 2 * (10 + 5), geometry), true, 'half a gap past the last cell still counts');
 assert.equal(isPointOnCells(100 + 2 * (10 + gridExtent + 6), 50 + 2 * (10 + 5), geometry), false, 'right padding is not');
 
-console.log('PASS: editor tools — continuous strokes, rectangles, flood fill with tolerance, pointer mapping.');
+// Shapes: outline rectangles, ellipses, lines through shapeCells.
+const {cellsInEllipse, shapeCells, isShapeTool} = require('../src/lib/grid-tools.ts');
+const sorted = list => [...list].sort((a, b) => a - b);
+assert.deepEqual(sorted(cellsInRect(at(1, 1), at(3, 4), cols, false)), sorted([at(1, 1), at(1, 2), at(1, 3), at(1, 4), at(2, 1), at(2, 4), at(3, 1), at(3, 2), at(3, 3), at(3, 4)]), 'outline rectangle is its border');
+assert.equal(cellsInRect(at(1, 1), at(1, 1), cols, false).length, 1, 'a one-cell outline is that cell');
+assert.deepEqual(sorted(cellsInEllipse(at(0, 0), at(2, 2), cols)), sorted([at(0, 1), at(1, 0), at(1, 1), at(1, 2), at(2, 1)]), 'a 3x3 circle is a plus, not a square');
+const disc = cellsInEllipse(at(0, 0), at(6, 6), cols), ring2 = cellsInEllipse(at(0, 0), at(6, 6), cols, false);
+assert(ring2.length < disc.length && ring2.every(c => disc.includes(c)), 'the outline is part of the disc');
+assert(!ring2.includes(at(3, 3)), 'the outline is hollow');
+assert(!disc.includes(at(0, 0)) && disc.includes(at(3, 0)) && disc.includes(at(0, 3)), 'corners are cut, edge midpoints kept');
+assert.deepEqual(sorted(cellsInEllipse(at(6, 6), at(0, 0), cols)), sorted(disc), 'any drag direction');
+assert.deepEqual(shapeCells('line', at(0, 0), at(0, 3), cols, true), [0, 1, 2, 3]);
+assert.deepEqual(shapeCells('rect', at(0, 0), at(2, 2), cols, false).length, 8);
+assert(isShapeTool('ellipse') && !isShapeTool('fill'));
+
+// Whole-drawing transforms keep colours with their cells; nudges drop what leaves the grid.
+const {transformPattern} = require('../src/lib/grid-transforms.ts');
+const drawing = {cells: [at(0, 0), at(0, 1), at(2, 7)], colors: {[at(0, 1)]: '#FF0000'}};
+const tf = op => transformPattern(drawing.cells, drawing.colors, rows, cols, op);
+assert.deepEqual(tf('right'), {activeCells: [at(0, 1), at(0, 2)], cellColors: {[at(0, 2)]: '#FF0000'}}, 'nudge right drops the cell at the edge');
+assert.deepEqual(tf('down').activeCells, [at(1, 0), at(1, 1), at(3, 7)]);
+assert.deepEqual(tf('flip-h'), {activeCells: [at(0, 6), at(0, 7), at(2, 0)], cellColors: {[at(0, 6)]: '#FF0000'}});
+assert.deepEqual(tf('flip-v').activeCells, [at(5, 7), at(7, 0), at(7, 1)]);
+assert.deepEqual(tf('rotate-cw').activeCells, [at(0, 7), at(1, 7), at(7, 5)], 'top row turns into the right column');
+const back = transformPattern(tf('rotate-cw').activeCells, tf('rotate-cw').cellColors, rows, cols, 'rotate-ccw');
+assert.deepEqual(back, {activeCells: drawing.cells, cellColors: drawing.colors}, 'rotate there and back is lossless');
+
+// Image import processing: black cut, colour reduction, dithering, frame sampling.
+const {sampleFrameIndices, sequenceFps} = require('../src/lib/image-import.ts');
+const strip = new Uint8ClampedArray(4 * 4 * 4);
+for (let i = 0; i < 16; i++) strip.set([i * 16, i * 8, 255 - i * 16, 255], i * 4);
+assert.equal(pixelsToCells(strip, 4, 4).cells.length, 16, 'every visible pixel is lit');
+const dim = new Uint8ClampedArray([20, 20, 20, 255, 200, 200, 200, 255]);
+assert.deepEqual(pixelsToCells(dim, 1, 2).cells, [0, 1], 'default cut keeps dim grey');
+assert.deepEqual(pixelsToCells(dim, 1, 2, {blackCut: 20}).cells, [1], 'a higher black cut turns dark pixels off');
+const reduced = pixelsToCells(strip, 4, 4, {colors: 4});
+assert(new Set(Object.values(reduced.colors)).size <= 4, 'colour reduction keeps at most 4 colours');
+const dithered = pixelsToCells(strip, 4, 4, {colors: 2, dither: true});
+assert(new Set(Object.values(dithered.colors)).size <= 2 && dithered.cells.length === 16, 'dithering still uses the reduced palette');
+const flat = new Uint8ClampedArray(8 * 8 * 4);
+for (let i = 0; i < 64; i++) flat.set([128, 128, 128, 255], i * 4);
+const bw = pixelsToCells(flat, 8, 8, {colors: 2, dither: true});
+assert.equal(new Set(Object.values(bw.colors)).size, 1, 'a flat image has one colour to reduce to');
+assert.deepEqual(sampleFrameIndices(5, 24), [0, 1, 2, 3, 4]);
+assert.deepEqual(sampleFrameIndices(48, 24).slice(0, 3), [0, 2, 4], 'long animations are sampled evenly');
+assert.equal(sequenceFps(2000, 24), 12, '24 frames over 2 s play at 12 fps');
+assert.equal(sequenceFps(100, 24), 20, 'clamped to what the panel plays');
+
+// Text tool: the built-in pixel fonts, wrapped and centred on the grid.
+const {textToCells} = require('../src/lib/text-cells.ts');
+const hi = textToCells('HI', 8, 8, 'small');
+assert(hi.length > 0 && hi.every(c => c >= 0 && c < 64), 'small text lands inside the grid');
+const hiRows = new Set(hi.map(c => Math.floor(c / 8)));
+assert.equal(hiRows.size, 5, 'the 3x5 font is five rows tall');
+assert.equal(Math.min(...hiRows), 1, 'centred vertically');
+const hanzi = textToCells('你好', 32, 32, 'large');
+assert(hanzi.length > 20 && new Set(hanzi.map(c => Math.floor(c / 32))).size <= 10, 'hanzi use the 10px font');
+const twoLines = textToCells('A\nB', 32, 32, 'small');
+assert.equal(new Set(twoLines.map(c => Math.floor(c / 32))).size, 10, 'line breaks make two lines');
+assert.deepEqual(textToCells('  \n ', 8, 8, 'large'), [], 'blank text draws nothing');
+
+console.log('PASS: editor tools — strokes, shapes, flood fill with tolerance, pointer mapping, transforms, image import, text.');

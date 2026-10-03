@@ -134,6 +134,8 @@ export type PatternSnapshot = {
   rows?: number;
   cols?: number;
   presetId?: PatternPresetId | "custom";
+  /** Colour of every lit cell (baked in, so it looks the same on any artboard). */
+  cellColors?: Record<string, string>;
 };
 
 export type AnimationConfig = {

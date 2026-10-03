@@ -1,8 +1,14 @@
 /** Pure geometry behind the canvas drawing tools; cells are row-major indices. */
 
-/** brush: paint (or erase when the stroke starts on a lit cell); erase; rect: drag a box; fill: bucket fill. */
-export type DrawTool = "brush" | "erase" | "rect" | "fill";
-export const DRAW_TOOLS: readonly DrawTool[] = ["brush", "erase", "rect", "fill"];
+/**
+ * brush: paint (or erase when the stroke starts on a lit cell); erase; line, rect, ellipse: drag a shape;
+ * fill: bucket fill; pick: eyedropper.
+ */
+export type DrawTool = "brush" | "erase" | "line" | "rect" | "ellipse" | "fill" | "pick";
+export const DRAW_TOOLS: readonly DrawTool[] = ["brush", "erase", "line", "rect", "ellipse", "fill", "pick"];
+export type ShapeTool = "line" | "rect" | "ellipse";
+export const SHAPE_TOOLS: readonly ShapeTool[] = ["line", "rect", "ellipse"];
+export const isShapeTool = (tool: DrawTool): tool is ShapeTool => (SHAPE_TOOLS as readonly string[]).includes(tool);
 
 const rowOf = (cell: number, cols: number) => Math.floor(cell / cols);
 const colOf = (cell: number, cols: number) => cell % cols;
@@ -27,13 +33,51 @@ export function cellsOnLine(from: number, to: number, cols: number): number[] {
   return cells;
 }
 
-/** All cells in the rectangle spanned by two corner cells, in any drag direction. */
-export function cellsInRect(a: number, b: number, cols: number): number[] {
+/** Row and column bounds of the box spanned by two corner cells, in any drag direction. */
+function boxOf(a: number, b: number, cols: number) {
   const [r0, r1] = [rowOf(a, cols), rowOf(b, cols)].sort((p, q) => p - q);
   const [c0, c1] = [colOf(a, cols), colOf(b, cols)].sort((p, q) => p - q);
+  return { r0, r1, c0, c1 };
+}
+
+/** All cells in the rectangle spanned by two corner cells (or only its border when not filled). */
+export function cellsInRect(a: number, b: number, cols: number, filled = true): number[] {
+  const { r0, r1, c0, c1 } = boxOf(a, b, cols);
   const cells: number[] = [];
-  for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) cells.push(r * cols + c);
+  for (let r = r0; r <= r1; r++) {
+    for (let c = c0; c <= c1; c++) {
+      if (filled || r === r0 || r === r1 || c === c0 || c === c1) cells.push(r * cols + c);
+    }
+  }
   return cells;
+}
+
+/**
+ * The ellipse inscribed in the box spanned by two corner cells (or only its outline). The radius is
+ * pulled in a quarter cell so small circles read as round instead of square.
+ */
+export function cellsInEllipse(a: number, b: number, cols: number, filled = true): number[] {
+  const { r0, r1, c0, c1 } = boxOf(a, b, cols);
+  const cy = (r0 + r1) / 2, cx = (c0 + c1) / 2;
+  const ry = (r1 - r0 + 1) / 2 - 0.25, rx = (c1 - c0 + 1) / 2 - 0.25;
+  const inside = (r: number, c: number) =>
+    r >= r0 && r <= r1 && c >= c0 && c <= c1 && ((c - cx) / rx) ** 2 + ((r - cy) / ry) ** 2 <= 1;
+  const cells: number[] = [];
+  for (let r = r0; r <= r1; r++) {
+    for (let c = c0; c <= c1; c++) {
+      if (!inside(r, c)) continue;
+      const edge = !inside(r - 1, c) || !inside(r + 1, c) || !inside(r, c - 1) || !inside(r, c + 1);
+      if (filled || edge) cells.push(r * cols + c);
+    }
+  }
+  return cells;
+}
+
+/** The cells a shape tool covers when dragged from one cell to another. */
+export function shapeCells(tool: ShapeTool, from: number, to: number, cols: number, filled: boolean): number[] {
+  if (tool === "line") return cellsOnLine(from, to, cols);
+  if (tool === "ellipse") return cellsInEllipse(from, to, cols, filled);
+  return cellsInRect(from, to, cols, filled);
 }
 
 /**

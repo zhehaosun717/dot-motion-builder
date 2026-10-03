@@ -11,24 +11,13 @@ import { useLiveEditorSync } from "@/components/editor/use-live-editor-sync";
 import { PreviewStage, SequencePreviewStage } from "@/components/editor/preview-stage";
 import { normalizeCellShape, shapeOptions } from "@/lib/cell-shapes";
 import { MAX_GRID_SIZE, MIN_SLIDER_GRID_SIZE } from "@/lib/grid-limits";
-import { DRAW_TOOLS, DrawTool, MAX_FILL_TOLERANCE } from "@/lib/grid-tools";
-import { importImageFile } from "@/lib/image-import";
-import { normalizeHexColor } from "@/lib/colors";
-
-/** Single-key shortcuts for the drawing tools (ignored while typing). */
-const DRAW_TOOL_KEYS: Record<string, DrawTool> = { b: "brush", e: "erase", r: "rect", g: "fill" };
-const drawToolCopy = {
-  cn: {
-    label: "绘制工具", brush: "画笔 B", erase: "橡皮 E", rect: "矩形 R", fill: "填充 G",
-    brushColor: "画笔颜色（Alt+点击吸色）", fillTolerance: "填充容差", importImage: "导入图片",
-    importHint: "按当前网格缩放，32×32 时一格一像素", importFailed: "图片读取失败，换一张试试"
-  },
-  en: {
-    label: "Draw tool", brush: "Brush B", erase: "Erase E", rect: "Rect R", fill: "Fill G",
-    brushColor: "Brush colour (Alt+click picks)", fillTolerance: "Fill tolerance", importImage: "Import Image",
-    importHint: "Scaled to the grid; at 32×32 one cell is one pixel", importFailed: "Could not read that image"
-  }
-} as const;
+import { GridTransform } from "@/lib/grid-transforms";
+import { DRAW_TOOL_KEYS, DrawingTools } from "@/components/editor/drawing-tools";
+import { ImageImportControls } from "@/components/editor/image-import-controls";
+import { PatternLibrarySection } from "@/components/editor/pattern-library-section";
+import { TextStampControls } from "@/components/editor/text-stamp-controls";
+import { redo, undo, useEditorHistory } from "@/stores/editor-history";
+import { useDrawStore } from "@/stores/use-draw-store";
 import { motionPresets } from "@/lib/motion-presets";
 import { inactiveStyleCopy, Language, motionPresetCopy, uiCopy } from "@/lib/ui-copy";
 import { useEditorStore } from "@/stores/use-editor-store";
@@ -75,6 +64,10 @@ const directionControlCells = [
   directionOptions[7]
 ];
 
+const ARROW_NUDGES: Record<string, GridTransform> = { ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up", ArrowDown: "down" };
+/** Focused widgets that move their own selection with the arrow keys. */
+const ARROW_KEY_WIDGETS = "[role='radiogroup'], [role='radio'], [role='slider'], [role='listbox'], [role='menu'], [role='tablist'], [role='combobox']";
+
 type CanvasArtboardProps = {
   loader: LoaderComponent;
   selected: boolean;
@@ -82,11 +75,7 @@ type CanvasArtboardProps = {
   previewMode: "none" | "selected" | "all";
   editable: boolean;
   onSelect: () => void;
-  tool: DrawTool;
-  brushColor: string;
   onApplyCells: (cells: number[], active: boolean, color?: string) => void;
-  onPickColor: (hex: string) => void;
-  fillTolerance: number;
   onDuplicate: () => void;
   onDelete: () => void;
   canDelete: boolean;
@@ -101,11 +90,7 @@ function CanvasArtboard({
   previewMode,
   editable,
   onSelect,
-  tool,
-  brushColor,
   onApplyCells,
-  onPickColor,
-  fillTolerance,
   onDuplicate,
   onDelete,
   canDelete,
@@ -177,15 +162,7 @@ function CanvasArtboard({
       ) : null}
       <div className="canvas-artboard__frame">
         {(selected || sequenceSelected) && editable && !previewingThis ? (
-          <DotGridEditor
-            loader={loader}
-            tool={tool}
-            brushColor={brushColor}
-            onApplyCells={onApplyCells}
-            onPickColor={onPickColor}
-            fillTolerance={fillTolerance}
-            variant="canvas"
-          />
+          <DotGridEditor loader={loader} onApplyCells={onApplyCells} variant="canvas" />
         ) : (
           <PreviewStage
             loader={loader}
@@ -312,14 +289,8 @@ export function EditorApp() {
   const selectLoader = useEditorStore((state) => state.selectLoader);
   const clearSelection = useEditorStore((state) => state.clearSelection);
   const setCellsActiveForLoader = useEditorStore((state) => state.setCellsActiveForLoader);
-  const [drawTool, setDrawTool] = useState<DrawTool>("brush");
   // null = paint with the active colour (no per-cell override), so the Active Color control keeps recolouring it.
-  const [brushChoice, setBrushChoice] = useState<string | null>(null);
-  const setBrushColor = (hex: string) => setBrushChoice(normalizeHexColor(hex));
-  const [fillTolerance, setFillTolerance] = useState(0);
-  const [importError, setImportError] = useState<string | null>(null);
-  const importInputRef = useRef<HTMLInputElement>(null);
-  const importCellsForLoader = useEditorStore((state) => state.importCellsForLoader);
+  const transformLoaderCells = useEditorStore((state) => state.transformLoaderCells);
   const addLoader = useEditorStore((state) => state.addLoader);
   const addSequenceFrame = useEditorStore((state) => state.addSequenceFrame);
   const removeSequenceFrame = useEditorStore((state) => state.removeSequenceFrame);
@@ -361,6 +332,7 @@ export function EditorApp() {
   const [previewScope, setPreviewScope] = useState<"none" | "selected" | "all">("none");
   useLiveEditorSync(project, editingLoader, previewScope !== "none");
   useDesktopBridge();
+  useEditorHistory();
   const [language, setLanguage] = useState<Language>("cn");
   const [showZoomHud, setShowZoomHud] = useState(false);
   const [collapsedSections, setCollapsedSections] = useState({
@@ -369,7 +341,8 @@ export function EditorApp() {
     animation: false,
     colors: true,
     effects: true,
-    panel: true
+    panel: true,
+    library: true
   });
   const zoomHudTimeoutRef = useRef<number | null>(null);
   const panStateRef = useRef<{
@@ -408,9 +381,30 @@ export function EditorApp() {
       }
 
       const modifier = event.metaKey || event.ctrlKey;
-      const toolKey = DRAW_TOOL_KEYS[event.key.toLowerCase()];
+      const key = event.key.toLowerCase();
+      const toolKey = DRAW_TOOL_KEYS[key];
       if (toolKey && !modifier && !event.altKey) {
-        setDrawTool(toolKey);
+        useDrawStore.getState().setTool(toolKey);
+        return;
+      }
+      if (modifier && !event.altKey && (key === "y" || (key === "z" && event.shiftKey))) {
+        event.preventDefault();
+        redo();
+        return;
+      }
+      if (modifier && !event.altKey && key === "z") {
+        event.preventDefault();
+        undo();
+        return;
+      }
+      // Arrow keys nudge the drawing, unless a control that uses arrows itself has focus.
+      const nudge = ARROW_NUDGES[event.key];
+      if (nudge && !modifier && !event.altKey && !(target instanceof Element && target.closest(ARROW_KEY_WIDGETS))) {
+        const { selectedLoaderId: loaderId } = useEditorStore.getState();
+        if (loaderId) {
+          event.preventDefault();
+          transformLoaderCells(loaderId, nudge);
+        }
         return;
       }
       if (modifier && event.key.toLowerCase() === "c") {
@@ -442,7 +436,7 @@ export function EditorApp() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [clearSelection, copySelectedLoader, deleteSelectedLoader, duplicateSelectedLoader, isExportOpen, pasteLoader]);
+  }, [clearSelection, copySelectedLoader, deleteSelectedLoader, duplicateSelectedLoader, isExportOpen, pasteLoader, transformLoaderCells]);
 
   const t = uiCopy[language];
   const canvasBounds = useMemo(() => {
@@ -534,23 +528,6 @@ export function EditorApp() {
       return;
     }
     setPreviewScope((value) => (value === "selected" ? "none" : "selected"));
-  }
-
-  /** Loads a picture into the selected grid as coloured cells and switches to the Static preset to show it as is. */
-  async function importImage(file: File) {
-    if (!hasSelection) return;
-    const loaderId = editingLoader.id;
-    try {
-      const { rows, cols } = editingLoader.pattern.grid;
-      const { cells, colors } = await importImageFile(file, rows, cols);
-      importCellsForLoader(loaderId, cells, colors);
-      // Decoding is async: only switch the preset if that artboard is still the one selected.
-      if (useEditorStore.getState().selectedLoaderId === loaderId) setMotionPreset("static");
-      setImportError(null);
-    } catch (error) {
-      console.warn("[editor] image import failed", error);
-      setImportError(drawToolCopy[language].importFailed);
-    }
   }
 
   function changeGridSize(value: number) {
@@ -948,11 +925,7 @@ export function EditorApp() {
                   previewMode={previewScope}
                   editable={previewScope === "none" && (item.id === selectedLoaderId || Boolean(selectedSequenceId && item.sequenceId === selectedSequenceId))}
                   onSelect={() => selectCanvasLoader(item.id)}
-                  tool={drawTool}
-                  brushColor={brushChoice ?? item.style.primaryColor}
                   onApplyCells={(cells, active, color) => setCellsActiveForLoader(item.id, cells, active, color)}
-                  onPickColor={setBrushColor}
-                  fillTolerance={fillTolerance}
                   onDuplicate={duplicateSelectedLoader}
                   onDelete={deleteSelectedLoader}
                   canDelete={
@@ -1002,42 +975,9 @@ export function EditorApp() {
                   onCollapsedChange={(value) => setCollapsedSections(current => ({ ...current, grid: value }))}
                 >
                   <div className="toolcraft-control-stack">
-                    <SegmentedControl
-                      ariaLabel={drawToolCopy[language].label}
-                      name={drawToolCopy[language].label}
-                      value={drawTool}
-                      options={DRAW_TOOLS.map((value) => ({ value, label: drawToolCopy[language][value] }))}
-                      onValueChange={(value) => {
-                        if ((DRAW_TOOLS as readonly string[]).includes(value)) setDrawTool(value as DrawTool);
-                      }}
-                    />
-                    <ColorOpacityControl
-                      showLabel
-                      name={drawToolCopy[language].brushColor}
-                      hex={brushChoice ?? editingLoader.style.primaryColor}
-                      opacity={100}
-                      onValueChange={({ hex }) => setBrushColor(hex)}
-                    />
-                    {drawTool === "fill" ? (
-                      <SliderControl showFill name={drawToolCopy[language].fillTolerance} min={0} max={MAX_FILL_TOLERANCE} step={1} unit="%" value={fillTolerance} onValueChange={setFillTolerance} />
-                    ) : null}
-                    <div className="image-import">
-                      <Button type="button" variant="outline" size="default" onClick={() => importInputRef.current?.click()}>
-                        {drawToolCopy[language].importImage}
-                      </Button>
-                      <span className="image-import__hint">{importError ?? drawToolCopy[language].importHint}</span>
-                      <input
-                        ref={importInputRef}
-                        type="file"
-                        accept="image/*"
-                        hidden
-                        onChange={(event) => {
-                          const file = event.target.files?.[0];
-                          event.target.value = "";
-                          if (file) void importImage(file);
-                        }}
-                      />
-                    </div>
+                    <DrawingTools language={language} loader={editingLoader} />
+                    <TextStampControls language={language} loader={editingLoader} />
+                    <ImageImportControls language={language} loader={editingLoader} />
                     <SliderControl showFill variant="discrete" markerCount={11} name={t.gridSize} min={MIN_SLIDER_GRID_SIZE} max={MAX_GRID_SIZE} step={1} value={editingLoader.pattern.grid.rows} valueLabel={`${editingLoader.pattern.grid.rows}×${editingLoader.pattern.grid.cols}`} onValueChange={changeGridSize} />
                     <SelectControl
                       name={t.shape}
@@ -1179,6 +1119,12 @@ export function EditorApp() {
                   language={language}
                   collapsed={collapsedSections.panel}
                   onCollapsedChange={(value) => setCollapsedSections(current => ({ ...current, panel: value }))}
+                />
+
+                <PatternLibrarySection
+                  language={language}
+                  collapsed={collapsedSections.library}
+                  onCollapsedChange={(value) => setCollapsedSections(current => ({ ...current, library: value }))}
                 />
 
                 <PanelSection

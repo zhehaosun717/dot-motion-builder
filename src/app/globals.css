@@ -2479,3 +2479,142 @@ select {
   font-size: 0.74rem;
   line-height: 1.4;
 }
+
+/* Drawing tools: history buttons, recent colours, whole-drawing moves. */
+.draw-button-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.draw-icon-button {
+  min-width: 32px;
+  padding-inline: 8px;
+  font-size: 0.95rem;
+}
+
+.draw-transform {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.draw-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.draw-swatch {
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--app-border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.draw-swatch.is-current,
+.draw-swatch:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+
+/* Image import options and the text tool. */
+.image-import-controls,
+.text-stamp {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.text-stamp__label {
+  color: var(--app-muted);
+  font-size: 0.78rem;
+}
+
+.text-stamp__input {
+  width: 100%;
+  min-height: 52px;
+  resize: vertical;
+  padding: 8px 10px;
+  border: 1px solid var(--app-border);
+  border-radius: 8px;
+  background: color-mix(in oklab, var(--input) 10%, transparent);
+  color: inherit;
+  font: inherit;
+  font-size: 0.85rem;
+}
+
+.text-stamp__input:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 0;
+}
+
+/* Library of saved drawings. */
+.pattern-library {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pattern-library__item {
+  position: relative;
+}
+
+.pattern-library__load {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 1px solid var(--app-border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: none;
+  cursor: pointer;
+}
+
+.pattern-library__load:hover,
+.pattern-library__load:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+
+.pattern-library__thumb {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  image-rendering: pixelated;
+}
+
+.pattern-library__delete {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  font-size: 0.85rem;
+  line-height: 20px;
+  cursor: pointer;
+  opacity: 0;
+}
+
+.pattern-library__item:hover .pattern-library__delete,
+.pattern-library__delete:focus-visible {
+  opacity: 1;
+}
+
+.dot-grid--tool-line .dot-grid__cell,
+.dot-grid--tool-ellipse .dot-grid__cell {
+  cursor: crosshair;
+}
+
+.dot-grid--tool-pick .dot-grid__cell {
+  cursor: cell;
+}

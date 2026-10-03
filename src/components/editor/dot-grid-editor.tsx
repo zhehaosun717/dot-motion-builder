@@ -6,20 +6,15 @@ import { getCellShapeClassName, getCellShapeStyle } from "@/lib/cell-shapes";
 import { getCanvasGridMetrics } from "@/lib/canvas-grid-metrics";
 import { rgbaWithOpacity } from "@/lib/colors";
 import { LEGACY_MAX_GRID_SIZE } from "@/lib/grid-limits";
-import { cellAtPoint, cellsInRect, cellsOnLine, colorsWithinTolerance, DrawTool, floodFillWhere, GridGeometry, isPointOnCells } from "@/lib/grid-tools";
+import { cellAtPoint, cellsOnLine, colorsWithinTolerance, floodFillWhere, GridGeometry, isPointOnCells, isShapeTool, shapeCells, ShapeTool } from "@/lib/grid-tools";
+import { useDrawStore } from "@/stores/use-draw-store";
 import { LoaderComponent } from "@/types/dot-motion";
 
+/** Tool, brush colour and tool options come from the draw store; Alt+click picks a colour with any tool. */
 type DotGridEditorProps = {
   loader: LoaderComponent;
-  tool?: DrawTool;
-  /** Colour the brush, rectangle and fill paint with; defaults to the loader's active colour. */
-  brushColor?: string;
-  /** Sets many cells at once (one call per stroke step, rectangle or fill), lit cells in the given colour. */
+  /** Sets many cells at once (one call per stroke step, shape or fill), lit cells in the given colour. */
   onApplyCells: (cells: number[], active: boolean, color?: string) => void;
-  /** Alt+click picks a cell's colour (eyedropper). */
-  onPickColor?: (hex: string) => void;
-  /** Fill tool: how different (0..100) a neighbouring colour may be and still be filled. */
-  fillTolerance?: number;
   variant?: "default" | "canvas";
 };
 
@@ -61,7 +56,7 @@ const DotCell = memo(function DotCell({ index, active, color, preview, className
   );
 });
 
-export function DotGridEditor({ loader, tool = "brush", brushColor, onApplyCells, onPickColor, fillTolerance = 0, variant = "default" }: DotGridEditorProps) {
+export function DotGridEditor({ loader, onApplyCells, variant = "default" }: DotGridEditorProps) {
   const { rows, cols, cellSize, gap } = loader.pattern.grid;
   const canvasMetrics = useMemo(() => getCanvasGridMetrics(loader), [loader]);
   const activeCells = useMemo(() => new Set(loader.pattern.activeCells), [loader.pattern.activeCells]);
@@ -70,14 +65,16 @@ export function DotGridEditor({ loader, tool = "brush", brushColor, onApplyCells
   const renderCellSize = variant === "canvas" ? canvasMetrics.cellSize : cellSize;
   const gridRef = useRef<HTMLDivElement>(null);
   const strokeRef = useRef<Stroke | null>(null);
-  const [rectPreview, setRectPreview] = useState<Set<number> | null>(null);
+  const [shapePreview, setShapePreview] = useState<Set<number> | null>(null);
+  const tool = useDrawStore((state) => state.tool);
+  const brushChoice = useDrawStore((state) => state.brushChoice);
 
   // Pointer handlers read the latest props from this ref so they never act on a stale grid.
   const cellColors = loader.pattern.cellColors;
-  const paintColor = (brushColor ?? loader.style.primaryColor).toUpperCase();
+  const paintColor = (brushChoice ?? loader.style.primaryColor).toUpperCase();
   const colorOf = (cell: number) => (cellColors?.[cell] ?? loader.style.primaryColor).toUpperCase();
-  const latest = useRef({ activeCells, onApplyCells, onPickColor, tool, rows, cols, renderCellSize, renderGap, paintColor, colorOf, fillTolerance });
-  latest.current = { activeCells, onApplyCells, onPickColor, tool, rows, cols, renderCellSize, renderGap, paintColor, colorOf, fillTolerance };
+  const latest = useRef({ activeCells, onApplyCells, rows, cols, renderCellSize, renderGap, paintColor, colorOf });
+  latest.current = { activeCells, onApplyCells, rows, cols, renderCellSize, renderGap, paintColor, colorOf };
 
   const geometry = useCallback((): GridGeometry => {
     const grid = gridRef.current as HTMLDivElement;
@@ -98,6 +95,11 @@ export function DotGridEditor({ loader, tool = "brush", brushColor, onApplyCells
     (event: ReactPointerEvent<HTMLDivElement>) => cellAtPoint(event.clientX, event.clientY, geometry()),
     [geometry]
   );
+  /** Holding Shift draws the other kind of shape (outline instead of solid, or the reverse). */
+  const shapeFor = useCallback((shape: ShapeTool, from: number, to: number, shiftKey: boolean) => {
+    const filled = useDrawStore.getState().shapeFilled !== shiftKey;
+    return shapeCells(shape, from, to, latest.current.cols, filled);
+  }, []);
 
   const handlePointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
@@ -112,46 +114,62 @@ export function DotGridEditor({ loader, tool = "brush", brushColor, onApplyCells
       // no active pointer to capture (e.g. synthetic events)
     }
     const cell = cellFromPointer(event);
-    const { activeCells: active, onApplyCells: apply, onPickColor: pick, tool: currentTool, rows: r, cols: c, paintColor: paint, colorOf: color, fillTolerance: tolerance } = latest.current;
-    if (event.altKey) {
-      if (active.has(cell)) pick?.(color(cell)); // eyedropper
+    const { activeCells: active, onApplyCells: apply, rows: r, cols: c, paintColor: paint, colorOf: color } = latest.current;
+    const draw = useDrawStore.getState();
+    if (event.altKey || draw.tool === "pick") {
+      // Eyedropper: takes a lit cell's colour, then returns to the tool you were using.
+      if (!active.has(cell)) return;
+      draw.setBrushColor(color(cell));
+      if (draw.tool === "pick") draw.setTool(draw.previousTool);
       return;
     }
     // Starting on a cell that already has the brush colour erases instead (toggle), as before colours.
     const alreadyPainted = active.has(cell) && color(cell) === paint;
-    const value = currentTool === "erase" ? false : currentTool === "rect" ? true : !alreadyPainted;
-    if (currentTool === "fill") {
+    const value = draw.tool === "erase" ? false : isShapeTool(draw.tool) ? true : !alreadyPainted;
+    if (value) draw.rememberColor(paint);
+    if (draw.tool === "fill") {
       const colorAt = (cellIndex: number) => (active.has(cellIndex) ? color(cellIndex) : null);
       const target = colorAt(cell);
-      apply(floodFillWhere(cell, r, c, (cellIndex) => colorsWithinTolerance(colorAt(cellIndex), target, tolerance)), value, paint);
+      const belongs = (cellIndex: number) => colorsWithinTolerance(colorAt(cellIndex), target, draw.fillTolerance);
+      const region = draw.fillContiguous
+        ? floodFillWhere(cell, r, c, belongs)
+        : Array.from({ length: r * c }, (_, index) => index).filter(belongs);
+      apply(region, value, paint);
       return;
     }
     strokeRef.current = { pointerId: event.pointerId, value, start: cell, last: cell };
-    if (currentTool === "rect") setRectPreview(new Set([cell]));
+    if (isShapeTool(draw.tool)) setShapePreview(new Set(shapeFor(draw.tool, cell, cell, event.shiftKey)));
     else apply([cell], value, paint);
-  }, [cellFromPointer, geometry]);
+  }, [cellFromPointer, geometry, shapeFor]);
 
   const handlePointerMove = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     const stroke = strokeRef.current;
     if (!stroke || stroke.pointerId !== event.pointerId) return;
     const cell = cellFromPointer(event);
-    if (cell === stroke.last) return;
-    const { onApplyCells: apply, tool: currentTool, cols: c, paintColor: paint } = latest.current;
-    if (currentTool === "rect") setRectPreview(new Set(cellsInRect(stroke.start, cell, c)));
-    else apply(cellsOnLine(stroke.last, cell, c), stroke.value, paint);
+    const { tool: currentTool } = useDrawStore.getState();
+    if (isShapeTool(currentTool)) {
+      // Re-evaluated on every move so pressing or releasing Shift mid-drag updates the preview.
+      setShapePreview(new Set(shapeFor(currentTool, stroke.start, cell, event.shiftKey)));
+    } else if (cell !== stroke.last) {
+      const { onApplyCells: apply, cols: c, paintColor: paint } = latest.current;
+      apply(cellsOnLine(stroke.last, cell, c), stroke.value, paint);
+    }
     strokeRef.current = { ...stroke, last: cell };
-  }, [cellFromPointer]);
+  }, [cellFromPointer, shapeFor]);
 
   const endStroke = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     const stroke = strokeRef.current;
     if (!stroke || stroke.pointerId !== event.pointerId) return;
     strokeRef.current = null;
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
-    const { onApplyCells: apply, tool: currentTool, cols: c, paintColor: paint } = latest.current;
+    const { onApplyCells: apply, paintColor: paint } = latest.current;
+    const { tool: currentTool } = useDrawStore.getState();
     // The release point counts too: a quick drag can end before a pointermove reports the last cell.
-    if (currentTool === "rect" && event.type === "pointerup") apply(cellsInRect(stroke.start, cellFromPointer(event), c), stroke.value, paint);
-    setRectPreview(null);
-  }, [cellFromPointer]);
+    if (isShapeTool(currentTool) && event.type === "pointerup") {
+      apply(shapeFor(currentTool, stroke.start, cellFromPointer(event), event.shiftKey), stroke.value, paint);
+    }
+    setShapePreview(null);
+  }, [cellFromPointer, shapeFor]);
 
   const { primaryColor, primaryAlpha, backgroundColor, backgroundAlpha, shadow, glow, cellShape, innerRadius } = loader.style;
   const cellStyle = useMemo<CSSProperties>(() => {
@@ -198,7 +216,7 @@ export function DotGridEditor({ loader, tool = "brush", brushColor, onApplyCells
             index={cellIndex}
             active={activeCells.has(cellIndex)}
             color={cellColors?.[cellIndex] ? rgbaWithOpacity(cellColors[cellIndex], 1, primaryAlpha ?? 1) : undefined}
-            preview={Boolean(rectPreview?.has(cellIndex))}
+            preview={Boolean(shapePreview?.has(cellIndex))}
             className={className}
             style={cellStyle}
             inactiveBackground={inactiveBackground}

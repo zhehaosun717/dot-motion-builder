@@ -3,6 +3,7 @@
 import { create } from "zustand";
 import { normalizeCellShape } from "@/lib/cell-shapes";
 import { MAX_GRID_SIZE, MIN_GRID_SIZE, MIN_SLIDER_GRID_SIZE } from "@/lib/grid-limits";
+import { GridTransform, transformPattern } from "@/lib/grid-transforms";
 import { createMockProject, PROJECT_VERSION } from "@/lib/mock-project";
 import { getDefaultMotionConfig } from "@/lib/motion-presets";
 import { buildPatternCells } from "@/lib/pattern-presets";
@@ -43,6 +44,14 @@ type EditorState = {
   setCellsActiveForLoader: (loaderId: string, cells: number[], active: boolean, color?: string) => void;
   /** Replaces a loader's lit cells and colours, e.g. from an imported image. */
   importCellsForLoader: (loaderId: string, cells: number[], colors: Record<string, string>) => void;
+  /** Moves, mirrors or rotates a loader's whole drawing. */
+  transformLoaderCells: (loaderId: string, op: GridTransform) => void;
+  /**
+   * Creates a new frame sequence (e.g. from an animated GIF) next to the given artboard, one frame per
+   * entry, and selects its first frame. Returns the new frames' ids in order.
+   */
+  importSequence: (baseLoaderId: string, frames: Array<{ cells: number[]; colors: Record<string, string> }>, fps: number) => string[];
+  deleteSavedPattern: (patternId: string) => void;
   setPatternSourceType: (sourceType: "template" | "drawn") => void;
   addLoader: (kind?: LoaderKind) => void;
   addSequenceFrame: (sequenceId: string) => void;
@@ -132,6 +141,12 @@ function sanitizeCellColors(colors: Record<string, string> | undefined, activeCe
     .map(([key, hex]) => [Number(key), String(hex).toUpperCase()] as const)
     .filter(([cell, hex]) => active.has(cell) && HEX_COLOR.test(hex));
   return kept.length ? Object.fromEntries(kept) : undefined;
+}
+
+/** Every lit cell's actual colour, so a saved drawing does not depend on the artboard's base colour. */
+function bakeCellColors(loader: LoaderComponent): Record<string, string> {
+  const base = loader.style.primaryColor.toUpperCase();
+  return Object.fromEntries(loader.pattern.activeCells.map((cell) => [cell, loader.pattern.cellColors?.[cell] ?? base]));
 }
 
 function sanitizeActiveCells(cells: number[] | undefined, grid: GridConfig) {
@@ -468,7 +483,8 @@ function normalizeProject(project: Project): Project {
         ...pattern,
         rows: clamp(Math.round(pattern.rows ?? DEFAULT_DRAWN_GRID.rows), MIN_GRID_SIZE, MAX_GRID_SIZE),
         cols: clamp(Math.round(pattern.cols ?? DEFAULT_DRAWN_GRID.cols), MIN_GRID_SIZE, MAX_GRID_SIZE),
-        presetId: pattern.presetId ?? "custom"
+        presetId: pattern.presetId ?? "custom",
+        cellColors: sanitizeCellColors(pattern.cellColors, pattern.activeCells ?? [])
       })),
       templates: []
     },
@@ -774,6 +790,41 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       saveProject(project);
       return { project };
     }),
+  transformLoaderCells: (loaderId, op) =>
+    set((state) => {
+      const project = updateLoaderById(state.project, loaderId, (loader) => {
+        const { rows, cols } = loader.pattern.grid;
+        const { activeCells, cellColors } = transformPattern(loader.pattern.activeCells, loader.pattern.cellColors, rows, cols, op);
+        return { ...loader, pattern: { ...loader.pattern, activeCells, cellColors } };
+      });
+
+      saveProject(project);
+      return { project };
+    }),
+  importSequence: (baseLoaderId, frames, fps) => {
+    const state = get();
+    const base = state.project.loaders.find((loader) => loader.id === baseLoaderId) ?? state.project.loaders[0];
+    if (!base || !frames.length) return [];
+    const sequenceId = crypto.randomUUID();
+    const origin = findNearbyArtboardPosition(state.project.loaders, base);
+    const grid = cloneGrid(base.pattern.grid);
+    const created = frames.map((frame, index) => {
+      const blank = createBlankCustomLoader(state.project.loaders.length + index, base, "sequence", sequenceId);
+      return {
+        ...blank,
+        name: `GIF ${index + 1}`,
+        sequenceIndex: index,
+        artboard: { x: origin.x + index * (ARTBOARD_SIZE + SEQUENCE_FRAME_GAP), y: origin.y, width: ARTBOARD_SIZE, height: ARTBOARD_SIZE },
+        pattern: { ...blank.pattern, grid: cloneGrid(grid), activeCells: sanitizeActiveCells(frame.cells, grid), cellColors: frame.colors },
+        animation: { ...blank.animation, fps: clamp(Math.round(fps), 1, 30) }
+      };
+    });
+    const loaders = reindexSequenceLoaders([...state.project.loaders, ...created.map((loader, index) => normalizeLoader(loader, state.project.loaders.length + index))]);
+    const project = { ...state.project, updatedAt: new Date().toISOString(), loaders };
+    saveProject(project);
+    set({ project, selectedLoaderId: created[0].id });
+    return created.map((loader) => loader.id);
+  },
   importCellsForLoader: (loaderId, cells, colors) =>
     set((state) => {
       const project = updateLoaderById(state.project, loaderId, (loader) => ({
@@ -1345,7 +1396,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
           ...loader.pattern,
           grid: nextGrid,
           activeCells: sanitizeActiveCells(savedPattern.activeCells, nextGrid),
-          cellColors: undefined
+          cellColors: savedPattern.cellColors ? { ...savedPattern.cellColors } : undefined
         },
         animation: normalizeAnimation(
           {
@@ -1375,7 +1426,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
               activeCells: [...loader.pattern.activeCells],
               rows: loader.pattern.grid.rows,
               cols: loader.pattern.grid.cols,
-              presetId: "custom"
+              presetId: "custom",
+              cellColors: bakeCellColors(loader)
             }
           ]
         }
@@ -1410,7 +1462,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         activeCells: [...loader.pattern.activeCells],
         rows: loader.pattern.grid.rows,
         cols: loader.pattern.grid.cols,
-        presetId: "custom"
+        presetId: "custom",
+        cellColors: bakeCellColors(loader)
       };
       const project = {
         ...state.project,
@@ -1418,6 +1471,20 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         assets: {
           ...state.project.assets,
           patterns: [nextPattern, ...state.project.assets.patterns]
+        }
+      };
+
+      saveProject(project);
+      return { project };
+    }),
+  deleteSavedPattern: (patternId) =>
+    set((state) => {
+      const project = {
+        ...state.project,
+        updatedAt: new Date().toISOString(),
+        assets: {
+          ...state.project.assets,
+          patterns: state.project.assets.patterns.filter((pattern) => pattern.id !== patternId)
         }
       };
 
