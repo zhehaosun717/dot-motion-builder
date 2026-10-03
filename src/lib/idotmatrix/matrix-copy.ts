@@ -6,6 +6,7 @@ export const matrixCopy = {
     format: "iDotMatrix",
     preview: "iDotMatrix 32×32 预览",
     showInactive: "显示未激活点",
+    pixelGaps: "格子间留缝",
     downloadGif: "下载 GIF",
     connectAndSend: "连接并发送",
     send: "发送到屏幕",
@@ -17,6 +18,7 @@ export const matrixCopy = {
     liveScreen: "投屏",
     liveScreenStop: "停止投屏",
     agentDisplay: "Agent 显示",
+    saveToPanel: "存到屏幕",
     overBudget: "GIF 超过 40 KB，屏幕播放可能会卡顿，可以减少序列帧数。",
     unsupported: "当前浏览器不支持 Web Bluetooth。请用桌面版 Chrome 或 Edge 打开，或先下载 GIF。"
   },
@@ -24,6 +26,7 @@ export const matrixCopy = {
     format: "iDotMatrix",
     preview: "iDotMatrix 32×32 preview",
     showInactive: "Show inactive dots",
+    pixelGaps: "Gaps between cells",
     downloadGif: "Download GIF",
     connectAndSend: "Connect & Send",
     send: "Send to Panel",
@@ -35,6 +38,7 @@ export const matrixCopy = {
     liveScreen: "Mirror Screen",
     liveScreenStop: "Stop Mirror",
     agentDisplay: "Agent Display",
+    saveToPanel: "Save to Panel",
     overBudget: "GIF is over 40 KB and may play sluggishly; try fewer sequence frames.",
     unsupported: "This browser has no Web Bluetooth. Open the editor in desktop Chrome or Edge, or download the GIF."
   }
@@ -67,7 +71,12 @@ export function describeMatrixStatus(status: MatrixStatus, deviceName: string | 
           ? `已发送，但有 ${status.missedAcks} 块没收到屏幕确认。如果画面没变，给屏幕断电 5 秒后再试。`
           : `Sent, but ${status.missedAcks} chunk(s) were not acknowledged. If nothing changed, power-cycle the panel for 5 s and retry.`;
       }
-      return cn ? `已发送到 ${name}，断开后屏幕也会继续循环播放。` : `Sent to ${name}. The panel keeps looping it after you disconnect.`;
+      if (status.agentPaused) {
+        return cn
+          ? `已保存到 ${name} 的板载内存，断开后会继续循环播放。Agent 显示已暂停，点顶栏「Agent 显示」可恢复。`
+          : `Saved to ${name}'s memory; it keeps looping after you disconnect. Agent display paused — turn it back on in the top bar.`;
+      }
+      return cn ? `已保存到 ${name} 的板载内存，断开后屏幕也会继续循环播放。` : `Saved to ${name}'s memory. The panel keeps looping it after you disconnect.`;
     case "error":
       if (status.reason === "unsupported") return matrixCopy[language].unsupported;
       if (status.reason === "bluetooth-off") {

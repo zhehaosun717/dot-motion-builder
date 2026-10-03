@@ -108,7 +108,13 @@ function projectWith(...loaders) {
 async function main() {
   // ------------------------------------------------------------ layout
   for (let size = 2; size <= 13; size++) {
-    const layout = getMatrixLayout(size, size);
+    // Default: blocks fill the panel, like scaled-up pixel art.
+    const tight = getMatrixLayout(size, size);
+    assert.equal(tight.gap, 0, `grid ${size} has no gaps by default`);
+    assert.equal(tight.cell, Math.floor(MATRIX_SIZE / size), `grid ${size} uses the largest whole block`);
+    assert(Math.abs(tight.offsetX * 2 + size * tight.cell - MATRIX_SIZE) <= 1, `grid ${size} is centred`);
+    // Optional dot-matrix look: a dark gap between dots.
+    const layout = getMatrixLayout(size, size, {gaps: true});
     const extent = size * layout.cell + (size - 1) * layout.gap;
     assert(extent <= MATRIX_SIZE, `grid ${size} must fit the panel`);
     assert(layout.cell >= 1 && layout.gap >= 1, `grid ${size} keeps a dark gap between dots`);
@@ -117,7 +123,9 @@ async function main() {
     assert(bigger > MATRIX_SIZE, `grid ${size} uses the largest cell that fits`);
     checks++;
   }
-  assert.deepEqual(getMatrixLayout(6, 6), {cell: 4, gap: 1, offsetX: 1, offsetY: 1}, '6x6 default grid -> 4px dots');
+  assert.deepEqual(getMatrixLayout(8, 8), {cell: 4, gap: 0, offsetX: 0, offsetY: 0}, '8x8 fills the panel with 4px blocks');
+  assert.deepEqual(getMatrixLayout(16, 16), {cell: 2, gap: 0, offsetX: 0, offsetY: 0}, '16x16 fills the panel with 2px blocks');
+  assert.deepEqual(getMatrixLayout(6, 6, {gaps: true}), {cell: 4, gap: 1, offsetX: 1, offsetY: 1}, '6x6 with gaps -> 4px dots');
   const wide = getMatrixLayout(3, 8);
   assert(wide.offsetY > wide.offsetX, 'non-square grids centre on both axes');
 
@@ -131,7 +139,12 @@ async function main() {
   const orange = Object.values(hexToRgb('#FF6B00'));
   assert.deepEqual(pixel(peak, 2, 2), orange, 'full-brightness cell shows the exact primary colour');
   assert.deepEqual(pixel(peak, 0, 0), [0, 0, 0], 'margin stays dark');
-  assert.deepEqual(pixel(peak, 5, 2), [0, 0, 0], 'gap between dots stays dark');
+  const spacedPeak = renderMatrixFrames(projectWith(breathing), breathing, {showInactive: false, gaps: true}).frames[frames.length / 2];
+  assert.deepEqual(pixel(spacedPeak, 5, 2), [0, 0, 0], 'with gaps on, the gap between dots stays dark');
+  const eight = makeLoader(8, 'breathing');
+  const eightFrames = renderMatrixFrames(projectWith(eight), eight, {showInactive: false}).frames;
+  const eightPeak = eightFrames[eightFrames.length / 2];
+  for (let i = 0; i < N; i++) assert.deepEqual(Array.from(eightPeak.subarray(i * 3, i * 3 + 3)), orange, `8x8: LED ${i} lit, no seams between blocks`);
   assert(pixel(frames[0], 2, 2)[0] < orange[0], 'breathing low point is dimmer');
   const totalCs = delaysCs.reduce((a, b) => a + b, 0);
   assert(Math.abs(totalCs - 100) <= 1, `loop keeps its 1000 ms duration (got ${totalCs}0 ms)`);

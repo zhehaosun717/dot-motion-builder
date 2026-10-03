@@ -108,6 +108,7 @@ async function main() {
   fs.writeFileSync(path.join(dataDir, API_INFO_FILE), '{"port": "x"}');
   assert.equal(readApiInfo(dataDir), null, 'a corrupt discovery file is ignored');
 
+  for (const dir of [staticDir, dataDir]) fs.rmSync(dir, {recursive: true, force: true});
   console.log('PASS: desktop — panel choice, API auth/host/CORS/size/validation, static serving without traversal, discovery file.');
 }
 

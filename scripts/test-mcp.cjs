@@ -90,6 +90,7 @@ async function main() {
   await mcpClient.close();
   fake.server.close();
 
+  for (const dir of [dataDir, launchDir, mcpDir]) fs.rmSync(dir, {recursive: true, force: true});
   console.log('PASS: mcp — client discovery/auth/errors/launch-on-demand, 5 tools end to end over MCP.');
 }
 

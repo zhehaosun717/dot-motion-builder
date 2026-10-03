@@ -10,6 +10,14 @@ import { useLiveEditorSync } from "@/components/editor/use-live-editor-sync";
 import { PreviewStage, SequencePreviewStage } from "@/components/editor/preview-stage";
 import { normalizeCellShape, shapeOptions } from "@/lib/cell-shapes";
 import { MAX_GRID_SIZE, MIN_SLIDER_GRID_SIZE } from "@/lib/grid-limits";
+import { DRAW_TOOLS, DrawTool } from "@/lib/grid-tools";
+
+/** Single-key shortcuts for the drawing tools (ignored while typing). */
+const DRAW_TOOL_KEYS: Record<string, DrawTool> = { b: "brush", e: "erase", r: "rect", g: "fill" };
+const drawToolCopy = {
+  cn: { label: "绘制工具", brush: "画笔 B", erase: "橡皮 E", rect: "矩形 R", fill: "填充 G" },
+  en: { label: "Draw tool", brush: "Brush B", erase: "Erase E", rect: "Rect R", fill: "Fill G" }
+} as const;
 import { motionPresets } from "@/lib/motion-presets";
 import { inactiveStyleCopy, Language, motionPresetCopy, uiCopy } from "@/lib/ui-copy";
 import { useEditorStore } from "@/stores/use-editor-store";
@@ -63,8 +71,8 @@ type CanvasArtboardProps = {
   previewMode: "none" | "selected" | "all";
   editable: boolean;
   onSelect: () => void;
-  onToggleCell: (cellIndex: number) => void;
-  onSetCellActive: (cellIndex: number, active: boolean) => void;
+  tool: DrawTool;
+  onApplyCells: (cells: number[], active: boolean) => void;
   onDuplicate: () => void;
   onDelete: () => void;
   canDelete: boolean;
@@ -79,8 +87,8 @@ function CanvasArtboard({
   previewMode,
   editable,
   onSelect,
-  onToggleCell,
-  onSetCellActive,
+  tool,
+  onApplyCells,
   onDuplicate,
   onDelete,
   canDelete,
@@ -154,8 +162,8 @@ function CanvasArtboard({
         {(selected || sequenceSelected) && editable && !previewingThis ? (
           <DotGridEditor
             loader={loader}
-            onToggleCell={onToggleCell}
-            onSetCellActive={onSetCellActive}
+            tool={tool}
+            onApplyCells={onApplyCells}
             variant="canvas"
           />
         ) : (
@@ -283,10 +291,8 @@ export function EditorApp() {
   const hydrate = useEditorStore((state) => state.hydrate);
   const selectLoader = useEditorStore((state) => state.selectLoader);
   const clearSelection = useEditorStore((state) => state.clearSelection);
-  const toggleCell = useEditorStore((state) => state.toggleCell);
-  const setCellActive = useEditorStore((state) => state.setCellActive);
-  const toggleCellForLoader = useEditorStore((state) => state.toggleCellForLoader);
-  const setCellActiveForLoader = useEditorStore((state) => state.setCellActiveForLoader);
+  const setCellsActiveForLoader = useEditorStore((state) => state.setCellsActiveForLoader);
+  const [drawTool, setDrawTool] = useState<DrawTool>("brush");
   const addLoader = useEditorStore((state) => state.addLoader);
   const addSequenceFrame = useEditorStore((state) => state.addSequenceFrame);
   const removeSequenceFrame = useEditorStore((state) => state.removeSequenceFrame);
@@ -374,6 +380,11 @@ export function EditorApp() {
       }
 
       const modifier = event.metaKey || event.ctrlKey;
+      const toolKey = DRAW_TOOL_KEYS[event.key.toLowerCase()];
+      if (toolKey && !modifier && !event.altKey) {
+        setDrawTool(toolKey);
+        return;
+      }
       if (modifier && event.key.toLowerCase() === "c") {
         event.preventDefault();
         copySelectedLoader();
@@ -888,12 +899,8 @@ export function EditorApp() {
                   previewMode={previewScope}
                   editable={previewScope === "none" && (item.id === selectedLoaderId || Boolean(selectedSequenceId && item.sequenceId === selectedSequenceId))}
                   onSelect={() => selectCanvasLoader(item.id)}
-                  onToggleCell={(cellIndex) => (
-                    item.id === selectedLoaderId ? toggleCell(cellIndex) : toggleCellForLoader(item.id, cellIndex)
-                  )}
-                  onSetCellActive={(cellIndex, active) => (
-                    item.id === selectedLoaderId ? setCellActive(cellIndex, active) : setCellActiveForLoader(item.id, cellIndex, active)
-                  )}
+                  tool={drawTool}
+                  onApplyCells={(cells, active) => setCellsActiveForLoader(item.id, cells, active)}
                   onDuplicate={duplicateSelectedLoader}
                   onDelete={deleteSelectedLoader}
                   canDelete={
@@ -943,6 +950,15 @@ export function EditorApp() {
                   onCollapsedChange={(value) => setCollapsedSections(current => ({ ...current, grid: value }))}
                 >
                   <div className="toolcraft-control-stack">
+                    <SegmentedControl
+                      ariaLabel={drawToolCopy[language].label}
+                      name={drawToolCopy[language].label}
+                      value={drawTool}
+                      options={DRAW_TOOLS.map((value) => ({ value, label: drawToolCopy[language][value] }))}
+                      onValueChange={(value) => {
+                        if ((DRAW_TOOLS as readonly string[]).includes(value)) setDrawTool(value as DrawTool);
+                      }}
+                    />
                     <SliderControl showFill variant="discrete" markerCount={11} name={t.gridSize} min={MIN_SLIDER_GRID_SIZE} max={MAX_GRID_SIZE} step={1} value={editingLoader.pattern.grid.rows} valueLabel={`${editingLoader.pattern.grid.rows}×${editingLoader.pattern.grid.cols}`} onValueChange={changeGridSize} />
                     <SelectControl
                       name={t.shape}

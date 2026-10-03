@@ -13,19 +13,20 @@ import { LoaderComponent, Project } from "@/types/dot-motion";
 export function useLiveEditorSync(project: Project, loader: LoaderComponent | undefined, animate: boolean) {
   const live = useMatrixStore((state) => state.live);
   const showInactive = useMatrixStore((state) => state.showInactive);
+  const gaps = useMatrixStore((state) => state.pixelGaps);
   const pushFrame = useMatrixStore((state) => state.pushFrame);
   const playFrames = useMatrixStore((state) => state.playFrames);
   const active = live === "editor" && Boolean(loader);
 
   useEffect(() => {
     if (!active || animate || !loader) return;
-    pushFrame(renderMatrixStill(loader, { showInactive }));
-  }, [active, animate, loader, pushFrame, showInactive]);
+    pushFrame(renderMatrixStill(loader, { showInactive, gaps }));
+  }, [active, animate, gaps, loader, pushFrame, showInactive]);
 
   useEffect(() => {
     if (!active || !animate || !loader) return;
     const startedAt = Date.now();
-    playFrames((displayAt) => renderMatrixAt(project, loader, displayAt - startedAt, { showInactive }));
+    playFrames((displayAt) => renderMatrixAt(project, loader, displayAt - startedAt, { showInactive, gaps }));
     return () => playFrames(null);
-  }, [active, animate, loader, playFrames, project, showInactive]);
+  }, [active, animate, gaps, loader, playFrames, project, showInactive]);
 }

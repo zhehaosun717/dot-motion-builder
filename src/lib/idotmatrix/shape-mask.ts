@@ -4,8 +4,8 @@ import { CellShape } from "@/types/dot-motion";
 /** Inside test in cell-local unit space: (0,0) top-left, (1,1) bottom-right. */
 export type ShapeMask = (u: number, v: number) => boolean;
 
-/** Shapes need room to read; tiny LED dots are always full squares. */
-const MIN_SHAPED_CELL_PX = 3;
+/** Shapes need room to read; below this, blocks are solid squares (rounded corners on 3-5px blocks look like seams). */
+const MIN_SHAPED_CELL_PX = 6;
 const ROUNDED_RADIUS = 0.22;
 
 const fullSquare: ShapeMask = () => true;

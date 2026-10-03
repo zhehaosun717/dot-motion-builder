@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Menu, nativeImage, Tray } from "electron";
+import { app, BrowserWindow, desktopCapturer, DesktopCapturerSource, ipcMain, Menu, MenuItemConstructorOptions, nativeImage, session, Tray } from "electron";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import type { Server } from "node:http";
@@ -127,6 +127,39 @@ function installDeviceChooser(win: BrowserWindow) {
   });
 }
 
+const MAX_WINDOW_CHOICES = 25;
+const truncate = (text: string, max = 48) => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
+
+/**
+ * Electron has no built-in screen picker on Windows, so getDisplayMedia (Mirror Screen) would fail.
+ * Offer screens and windows in a native menu; closing the menu cancels.
+ */
+function installScreenPicker() {
+  session.defaultSession.setDisplayMediaRequestHandler((_request, callback) => {
+    let answered = false;
+    const answer = (source?: DesktopCapturerSource) => {
+      if (answered) return;
+      answered = true;
+      callback(source ? { video: source } : {});
+    };
+    desktopCapturer.getSources({ types: ["screen", "window"], thumbnailSize: { width: 0, height: 0 } }).then((sources) => {
+      const screens = sources.filter((source) => source.id.startsWith("screen:"));
+      const windows = sources.filter((source) => !source.id.startsWith("screen:") && source.name && !source.name.startsWith(APP_NAME));
+      const items: MenuItemConstructorOptions[] = [
+        { label: "选择要投到点阵屏上的内容", enabled: false },
+        { type: "separator" },
+        ...screens.map((source, i) => ({ label: screens.length > 1 ? `屏幕 ${i + 1}` : "整个屏幕", click: () => answer(source) })),
+        { type: "separator" },
+        ...windows.slice(0, MAX_WINDOW_CHOICES).map((source) => ({ label: truncate(source.name), click: () => answer(source) })),
+        { type: "separator" },
+        { label: "取消", click: () => answer() }
+      ];
+      // The close callback can run before a click handler; defer it so a choice wins.
+      Menu.buildFromTemplate(items).popup({ window: window ?? undefined, callback: () => setTimeout(() => answer(), 0) });
+    }).catch(() => answer());
+  });
+}
+
 function showWindow() {
   if (!window) return;
   window.show();
@@ -219,6 +252,7 @@ app.whenReady().then(async () => {
   settings = loadSettings(dataDir());
   installAgentTools();
   Menu.setApplicationMenu(null);
+  installScreenPicker();
   const port = await startServer();
   createTray();
   createWindow(port, process.argv.includes(START_HIDDEN_FLAG));

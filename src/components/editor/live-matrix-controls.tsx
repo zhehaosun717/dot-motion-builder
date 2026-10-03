@@ -2,9 +2,11 @@
 
 import { useEffect, useState } from "react";
 import { getDesktopBridge } from "@/lib/desktop-bridge";
+import { buildMatrixGif } from "@/lib/idotmatrix/build-gif";
 import { describeMatrixStatus, matrixCopy } from "@/lib/idotmatrix/matrix-copy";
 import { isWebBluetoothAvailable } from "@/lib/idotmatrix/web-bluetooth";
 import { Language } from "@/lib/ui-copy";
+import { useEditorStore, useSelectedLoader } from "@/stores/use-editor-store";
 import { useMatrixStore } from "@/stores/use-matrix-store";
 import { Button } from "@/toolcraft/ui/components/primitives/button";
 
@@ -22,6 +24,9 @@ export function LiveMatrixControls({ language }: LiveMatrixControlsProps) {
   const disconnect = useMatrixStore((state) => state.disconnect);
   const agentEnabled = useMatrixStore((state) => state.agentEnabled);
   const setAgentEnabled = useMatrixStore((state) => state.setAgentEnabled);
+  const sendGif = useMatrixStore((state) => state.sendGif);
+  const project = useEditorStore((state) => state.project);
+  const loader = useSelectedLoader();
   const [supported, setSupported] = useState(false);
   const [desktop, setDesktop] = useState(false);
   const copy = matrixCopy[language];
@@ -35,6 +40,12 @@ export function LiveMatrixControls({ language }: LiveMatrixControlsProps) {
 
   const busy = status.kind === "connecting" || status.kind === "picking" || status.kind === "uploading";
   const statusText = describeMatrixStatus(status, link?.name ?? null, language);
+
+  /** Stores the animation being edited in the panel's own memory as a looping GIF. */
+  function saveToPanel() {
+    const { showInactive, pixelGaps } = useMatrixStore.getState();
+    void sendGif(buildMatrixGif(project, loader, { showInactive, gaps: pixelGaps }).gif);
+  }
 
   if (!link) {
     return (
@@ -83,6 +94,9 @@ export function LiveMatrixControls({ language }: LiveMatrixControlsProps) {
         onClick={() => void setLive(live === "screen" ? "off" : "screen")}
       >
         {live === "screen" ? copy.liveScreenStop : copy.liveScreen}
+      </Button>
+      <Button type="button" className="toolbar-button" variant="outline" size="default" disabled={busy} title={statusText} onClick={saveToPanel}>
+        {copy.saveToPanel}
       </Button>
       <Button type="button" className="toolbar-button" variant="outline" size="default" disabled={busy} title={statusText} onClick={disconnect}>
         {copy.disconnect}

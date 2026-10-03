@@ -19,7 +19,7 @@ export type MatrixStatus =
   | { kind: "connected" }
   | { kind: "live"; source: Exclude<LiveSource, "off"> }
   | { kind: "uploading"; sent: number; total: number }
-  | { kind: "sent"; missedAcks: number }
+  | { kind: "sent"; missedAcks: number; agentPaused: boolean }
   | { kind: "error"; reason: MatrixErrorKind; detail: string };
 
 type MatrixState = {
@@ -27,6 +27,8 @@ type MatrixState = {
   status: MatrixStatus;
   live: LiveSource;
   showInactive: boolean;
+  /** Dark line between scaled-up cells on the panel (off: blocks fill the panel edge to edge). */
+  pixelGaps: boolean;
   /** Desktop app: agents may drive the panel whenever you are not using live sync or mirroring. */
   agentEnabled: boolean;
   agentScene: AgentScene | null;
@@ -39,6 +41,7 @@ type MatrixState = {
   /** Streams an animation by sampling it whenever the link is free; null stops it. */
   playFrames: (source: FrameSource | null) => void;
   setShowInactive: (value: boolean) => void;
+  setPixelGaps: (value: boolean) => void;
   showAgentScene: (scene: AgentScene) => void;
   setAgentEnabled: (enabled: boolean) => void;
   disconnect: () => void;
@@ -95,6 +98,7 @@ export const useMatrixStore = create<MatrixState>((set, get) => {
     status: { kind: "idle" },
     live: "off",
     showInactive: true,
+    pixelGaps: false,
     agentEnabled: false,
     agentScene: null,
     lastDisconnect: null,
@@ -150,7 +154,11 @@ export const useMatrixStore = create<MatrixState>((set, get) => {
       try {
         const result = await link.uploadGif(gif, (sent, total) => update({ kind: "uploading", sent, total }));
         stream?.reset();
-        update({ kind: "sent", missedAcks: result.missedAcks });
+        // The GIF now lives in the panel's memory; agent scenes would replace it on the next hook, so the
+        // agent display pauses until you turn it back on.
+        const agentPaused = get().agentEnabled;
+        if (agentPaused && isCurrent(link)) set({ agentEnabled: false });
+        update({ kind: "sent", missedAcks: result.missedAcks, agentPaused });
       } catch (error) {
         update(toErrorStatus(error, "upload-failed"));
       }
@@ -208,6 +216,7 @@ export const useMatrixStore = create<MatrixState>((set, get) => {
     },
 
     setShowInactive: (value) => set({ showInactive: value }),
+    setPixelGaps: (value) => set({ pixelGaps: value }),
 
     showAgentScene: (scene) => {
       agentSince = Date.now();

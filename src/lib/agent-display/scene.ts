@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { CJK_FONT_HEIGHT, drawCjk, measureCjk, needsCjk, wrapCjk } from "@/lib/agent-display/cjk-font";
 import { paintMood, MOODS } from "@/lib/agent-display/face";
 import { drawText, GLYPH_ADVANCE, GLYPH_HEIGHT, measureText, wrapText } from "@/lib/agent-display/font";
 import { PixelCanvas, Rgb } from "@/lib/agent-display/pixel-canvas";
@@ -14,6 +15,10 @@ const TEXT_MAX_LINES = Math.floor((SIZE + 1) / TEXT_LINE_HEIGHT);
 const MARQUEE_SCALE = 2;
 const MARQUEE_PX_PER_S = 22;
 const LABEL_TOP = 26;
+/** Chinese uses the 10px font: 3 lines at an 11px pitch fill the 32px panel exactly. */
+const CJK_LINE_PITCH = CJK_FONT_HEIGHT + 1;
+const CJK_MAX_LINES = Math.floor((SIZE + 1) / CJK_LINE_PITCH);
+const CJK_LABEL_TOP = SIZE - CJK_FONT_HEIGHT;
 const DEFAULT_TEXT_COLOR: Rgb = [255, 220, 140];
 
 const hexColor = z.string().regex(/^#?[0-9a-fA-F]{6}$/, "color must be a hex colour like #FF8800");
@@ -60,8 +65,10 @@ function parseHex(hex: string): Rgb {
 }
 
 function textLayout(text: string) {
-  const lines = wrapText(text, TEXT_LINE_CHARS);
-  return lines.length <= TEXT_MAX_LINES ? { lines, marquee: false } : { lines: [text.replace(/\s+/g, " ")], marquee: true };
+  const cjk = needsCjk(text);
+  const lines = cjk ? wrapCjk(text, SIZE) : wrapText(text, TEXT_LINE_CHARS);
+  const fits = lines.length <= (cjk ? CJK_MAX_LINES : TEXT_MAX_LINES);
+  return { cjk, lines: fits ? lines : [text.replace(/\s+/g, " ")], marquee: !fits };
 }
 
 /** Whether frames change over time (static scenes only need to be sent once). */
@@ -76,7 +83,16 @@ function marqueeOffset(width: number, t: number) {
 }
 
 function paintText(canvas: PixelCanvas, text: string, color: Rgb, t: number) {
-  const { lines, marquee } = textLayout(text);
+  const { lines, marquee, cjk } = textLayout(text);
+  if (cjk) {
+    if (marquee) {
+      drawCjk(canvas, lines[0], SIZE - marqueeOffset(measureCjk(lines[0]), t), Math.floor((SIZE - CJK_FONT_HEIGHT) / 2), color);
+      return;
+    }
+    const top = Math.floor((SIZE - (lines.length * CJK_LINE_PITCH - 1)) / 2);
+    lines.forEach((line, i) => drawCjk(canvas, line, Math.floor((SIZE - measureCjk(line)) / 2), top + i * CJK_LINE_PITCH, color));
+    return;
+  }
   if (marquee) {
     const width = measureText(lines[0], MARQUEE_SCALE);
     drawText(canvas, lines[0], SIZE - marqueeOffset(width, t), (SIZE - GLYPH_HEIGHT * MARQUEE_SCALE) / 2, color, MARQUEE_SCALE);
@@ -87,6 +103,12 @@ function paintText(canvas: PixelCanvas, text: string, color: Rgb, t: number) {
 }
 
 function paintLabel(canvas: PixelCanvas, label: string, color: Rgb, t: number) {
+  if (needsCjk(label)) {
+    const cjkWidth = measureCjk(label);
+    const cx = cjkWidth <= SIZE ? Math.floor((SIZE - cjkWidth) / 2) : SIZE - marqueeOffset(cjkWidth, t);
+    drawCjk(canvas, label, cx, CJK_LABEL_TOP, color);
+    return;
+  }
   const width = measureText(label);
   const x = width <= SIZE ? Math.floor((SIZE - width) / 2) : SIZE - marqueeOffset(width, t);
   drawText(canvas, label, x, LABEL_TOP + 1, color);
@@ -108,7 +130,8 @@ export function renderScene(scene: AgentScene, t: number): Uint8Array {
       paintMood(canvas, scene.mood, time);
       break;
     case "status":
-      paintStatus(canvas, scene.status, time, scene.label ? 12 : 16);
+      // Icons move up to make room for a label; a Chinese label needs a 10px band.
+      paintStatus(canvas, scene.status, time, !scene.label ? 16 : needsCjk(scene.label) ? 10 : 12);
       if (scene.label) paintLabel(canvas, scene.label, statusColor(scene.status), time);
       break;
     case "text":

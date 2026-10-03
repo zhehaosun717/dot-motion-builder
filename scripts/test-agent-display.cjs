@@ -54,6 +54,41 @@ assert(isAnimated(long), 'long text scrolls');
 assert(differs(renderScene(long, 0), renderScene(long, 500)), 'marquee moves');
 previews.push(['text', shortFrame]);
 
+// Chinese: a 10px pixel font, 3 lines x 3 hanzi static, longer text scrolls.
+const {cjkGlyph, measureCjk, needsCjk, CJK_FONT_GLYPH_COUNT} = require('../src/lib/agent-display/cjk-font.ts');
+assert(CJK_FONT_GLYPH_COUNT > 8000, `font covers GB2312 and common Big5 (${CJK_FONT_GLYPH_COUNT})`);
+for (const ch of '的一是中國龍你好完成，。！') assert(cjkGlyph(ch.codePointAt(0)), `glyph for ${ch}`);
+const zhong = cjkGlyph('中'.codePointAt(0));
+assert.equal(zhong.width, 10, 'hanzi are 10px wide');
+// BDF: BBX 9x9 at y-offset -1 under ascent 9, so the glyph starts on row 1 of the 10-row cell.
+assert.equal(zhong.bits[1 * 10 + 4], 1, '中: vertical stroke at the top centre');
+assert.equal(zhong.bits[3 * 10 + 0], 1, '中: box left edge');
+assert.equal(zhong.bits[0 * 10 + 0], 0, '中: empty corner');
+assert.equal(cjkGlyph('A'.codePointAt(0)).width, 5, 'Latin is half width');
+assert.equal(measureCjk('你好'), 20);
+assert.equal(measureCjk('AI完成'), 30);
+assert(needsCjk('构建成功') && needsCjk('build 完成') && !needsCjk('BUILD OK'), 'Chinese switches font, ASCII keeps the 3x5 font');
+
+const nihao = parseScene({kind: 'text', text: '你好'});
+assert(!isAnimated(nihao), 'short Chinese text is static');
+const nihaoFrame = renderScene(nihao, 0);
+assert(lit(nihaoFrame) > 30, 'Chinese glyphs are drawn');
+const rowsLit = y => [...Array(32).keys()].some(x => pixel(nihaoFrame, x, y).some(v => v));
+assert(!rowsLit(0) && !rowsLit(31) && rowsLit(16), 'one line is vertically centred');
+const nine = parseScene({kind: 'text', text: '今天天气真不错啊！'});
+assert(!isAnimated(nine), 'nine hanzi fit as 3 lines of 3');
+const longZh = parseScene({kind: 'text', text: '所有测试都通过了，可以合并发布新版本'});
+assert(isAnimated(longZh), 'longer Chinese scrolls');
+assert(differs(renderScene(longZh, 0), renderScene(longZh, 600)), 'Chinese marquee moves');
+assert(lit(renderScene(parseScene({kind: 'text', text: 'CI 通过'}), 0)) > 20, 'mixed Latin and Chinese renders');
+const zhLabel = renderScene(parseScene({kind: 'status', status: 'done', label: '部署'}), 900);
+assert(lit(zhLabel.subarray(22 * 32 * 3)) > 15, 'Chinese label gets a taller band');
+const missing = renderScene(parseScene({kind: 'text', text: '🙂'}), 0);
+assert(lit(missing) > 0, 'unsupported characters show a placeholder instead of nothing');
+previews.push(['你好', nihaoFrame]);
+previews.push(['nine', renderScene(nine, 0)]);
+previews.push(['label', zhLabel]);
+
 // Pixel art from an LLM-friendly palette grid, optionally animated.
 const smiley = ['..yyyy..', '.y....y.', 'y.k..k.y', 'y......y', 'y.k..k.y', 'y..kk..y', '.y....y.', '..yyyy..'];
 const pixels = parseScene({kind: 'pixels', frames: [smiley], palette: {y: '#FFD000', k: '#FF0000'}});

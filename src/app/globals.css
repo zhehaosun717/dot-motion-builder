@@ -2443,3 +2443,25 @@ select {
 .dot-grid--dense .dot-grid__cell.is-active {
   box-shadow: 0 0 var(--cell-glow-size, 4px) color-mix(in srgb, var(--cell-glow-color, var(--cell-color)) 58%, transparent);
 }
+
+/* Drawing tools: rectangle preview outline and per-tool cursors. */
+.dot-grid__cell.is-preview {
+  box-shadow: inset 0 0 0 2px var(--accent-strong);
+}
+
+.dot-grid--dense .dot-grid__cell.is-preview {
+  box-shadow: inset 0 0 0 1px var(--accent-strong);
+}
+
+.dot-grid--tool-brush .dot-grid__cell,
+.dot-grid--tool-rect .dot-grid__cell {
+  cursor: crosshair;
+}
+
+.dot-grid--tool-erase .dot-grid__cell {
+  cursor: cell;
+}
+
+.dot-grid--tool-fill .dot-grid__cell {
+  cursor: copy;
+}

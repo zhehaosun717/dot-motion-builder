@@ -27,6 +27,8 @@ export function MatrixExport({ language, onDownload }: MatrixExportProps) {
   const disconnect = useMatrixStore((state) => state.disconnect);
   const showInactive = useMatrixStore((state) => state.showInactive);
   const setShowInactive = useMatrixStore((state) => state.setShowInactive);
+  const gaps = useMatrixStore((state) => state.pixelGaps);
+  const setGaps = useMatrixStore((state) => state.setPixelGaps);
   const [supported, setSupported] = useState(true);
   const copy = matrixCopy[language];
 
@@ -37,8 +39,8 @@ export function MatrixExport({ language, onDownload }: MatrixExportProps) {
   const deferredProject = useDeferredValue(project);
   const deferredLoader = useDeferredValue(loader);
   const result = useMemo(
-    () => buildMatrixGif(deferredProject, deferredLoader, { showInactive }),
-    [deferredProject, deferredLoader, showInactive]
+    () => buildMatrixGif(deferredProject, deferredLoader, { showInactive, gaps }),
+    [deferredProject, deferredLoader, gaps, showInactive]
   );
   const busy = status.kind === "connecting" || status.kind === "picking" || status.kind === "uploading";
   const sizeKb = (result.gif.length / 1024).toFixed(1);
@@ -55,6 +57,7 @@ export function MatrixExport({ language, onDownload }: MatrixExportProps) {
           <span>32×32 · {result.frameCount} {copy.frames} · {result.fps} fps · {sizeKb} KB</span>
         </p>
         <SwitchControl checked={showInactive} name={copy.showInactive} onCheckedChange={setShowInactive} />
+        <SwitchControl checked={gaps} name={copy.pixelGaps} onCheckedChange={setGaps} />
         {result.gif.length > GIF_BUDGET_BYTES ? <p className="matrix-export__note">{copy.overBudget}</p> : null}
         <p className="matrix-export__status" role="status">
           {supported ? describeMatrixStatus(status, link?.name ?? null, language) : copy.unsupported}

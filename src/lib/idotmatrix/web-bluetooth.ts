@@ -62,21 +62,35 @@ export async function connectMatrix(onDisconnected: (link: MatrixLink) => void):
     throw new MatrixError(classifyChooserError(error), error);
   }
 
-  try {
-    if (!device.gatt) throw new Error("device has no GATT server");
-    const server = await device.gatt.connect();
-    const service = await server.getPrimaryService(SERVICE_UUID);
-    const [write, notify] = await Promise.all([service.getCharacteristic(WRITE_UUID), service.getCharacteristic(NOTIFY_UUID)]);
-    await notify.startNotifications();
-    const link = new MatrixLink(
-      { name: device.name ?? "iDotMatrix", write, notify, disconnect: () => server.disconnect() },
-      { packetSizes: packetSizesForPlatform() }
-    );
-    device.addEventListener("gattserverdisconnected", () => onDisconnected(link), { once: true });
-    await link.send(SCREEN_ON);
-    return link;
-  } catch (error) {
-    device.gatt?.disconnect();
-    throw new MatrixError("connect-failed", error);
+  let lastError: unknown = null;
+  for (let attempt = 1; attempt <= CONNECT_ATTEMPTS; attempt++) {
+    try {
+      return await openLink(device, onDisconnected);
+    } catch (error) {
+      // Windows often drops the first GATT connection right after it opens ("GATT Server is
+      // disconnected. Cannot retrieve services."), especially just after another client let go.
+      lastError = error;
+      device.gatt?.disconnect();
+      if (attempt < CONNECT_ATTEMPTS) await new Promise(resolve => setTimeout(resolve, CONNECT_RETRY_MS * attempt));
+    }
   }
+  throw new MatrixError("connect-failed", lastError);
+}
+
+const CONNECT_ATTEMPTS = 3;
+const CONNECT_RETRY_MS = 700;
+
+async function openLink(device: BleDevice, onDisconnected: (link: MatrixLink) => void): Promise<MatrixLink> {
+  if (!device.gatt) throw new Error("device has no GATT server");
+  const server = await device.gatt.connect();
+  const service = await server.getPrimaryService(SERVICE_UUID);
+  const [write, notify] = await Promise.all([service.getCharacteristic(WRITE_UUID), service.getCharacteristic(NOTIFY_UUID)]);
+  await notify.startNotifications();
+  const link = new MatrixLink(
+    { name: device.name ?? "iDotMatrix", write, notify, disconnect: () => server.disconnect() },
+    { packetSizes: packetSizesForPlatform() }
+  );
+  device.addEventListener("gattserverdisconnected", () => onDisconnected(link), { once: true });
+  await link.send(SCREEN_ON);
+  return link;
 }

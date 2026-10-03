@@ -5,7 +5,9 @@ import { getShapeMask, ShapeMask } from "@/lib/idotmatrix/shape-mask";
 import { LoaderComponent, Project } from "@/types/dot-motion";
 
 export type MatrixLayout = { cell: number; gap: number; offsetX: number; offsetY: number };
-export type MatrixRenderOptions = { showInactive: boolean; maxFrames?: number };
+/** gaps: leave a dark line between scaled-up cells (dot-matrix look); off fills the panel edge to edge. */
+export type MatrixRenderOptions = { showInactive: boolean; gaps?: boolean; maxFrames?: number };
+type FrameOptions = Pick<MatrixRenderOptions, "showInactive" | "gaps">;
 export type MatrixFrames = { frames: Uint8Array[]; delaysCs: number[]; fps: number };
 
 type FramePlan = { loader: LoaderComponent; progress: number; discrete: boolean; delayCs: number };
@@ -31,10 +33,18 @@ function linearize({ r, g, b }: RgbColor): RgbColor {
   return { r: toLinear(r), g: toLinear(g), b: toLinear(b) };
 }
 
-/** Largest square dot that fits the grid on the panel, always with a dark gap, centred. */
-export function getMatrixLayout(rows: number, cols: number, size = MATRIX_SIZE): MatrixLayout {
+/**
+ * Largest whole-pixel block per cell, centred. By default blocks touch (8x8 -> 4px blocks filling the
+ * panel); with gaps a dark line separates dots, which shrinks the blocks.
+ */
+export function getMatrixLayout(rows: number, cols: number, options: { gaps?: boolean } = {}): MatrixLayout {
+  const size = MATRIX_SIZE;
   const span = Math.max(rows, cols);
   const extentOf = (n: number, cell: number, gap: number) => n * cell + (n - 1) * gap;
+  if (!options.gaps) {
+    const block = Math.max(1, Math.floor(size / span));
+    return { cell: block, gap: 0, offsetX: Math.floor((size - cols * block) / 2), offsetY: Math.floor((size - rows * block) / 2) };
+  }
   let cell = Math.max(1, Math.floor((size + 1) / span));
   while (cell > 1 && extentOf(span, cell, gapFor(cell)) > size) cell--;
   const gap = extentOf(span, cell, gapFor(cell)) <= size ? gapFor(cell) : 0;
@@ -106,10 +116,10 @@ function compose(active: Float32Array, inactive: Float32Array, style: FrameStyle
   return rgb;
 }
 
-function renderFrame(plan: FramePlan, showInactive: boolean) {
+function renderFrame(plan: FramePlan, { showInactive, gaps }: FrameOptions) {
   const { loader, progress, discrete } = plan;
   const { rows, cols } = loader.pattern.grid;
-  const layout = getMatrixLayout(rows, cols);
+  const layout = getMatrixLayout(rows, cols, { gaps });
   const style: FrameStyle = {
     primary: hexToRgb(loader.style.primaryColor),
     inactive: linearize(hexToRgb(loader.style.backgroundColor ?? "#2D3743")),
@@ -134,20 +144,20 @@ function renderFrame(plan: FramePlan, showInactive: boolean) {
 }
 
 /** The drawn pattern as it looks while editing: active cells fully lit, inactive dots at rest. */
-export function renderMatrixStill(loader: LoaderComponent, options: { showInactive: boolean }): Uint8Array {
-  return renderFrame({ loader, progress: 0, discrete: true, delayCs: 0 }, options.showInactive);
+export function renderMatrixStill(loader: LoaderComponent, options: FrameOptions): Uint8Array {
+  return renderFrame({ loader, progress: 0, discrete: true, delayCs: 0 }, options);
 }
 
 /** The frame at elapsedMs into the (looping) animation, for live streaming at whatever rate the link allows. */
-export function renderMatrixAt(project: Project, loader: LoaderComponent, elapsedMs: number, options: { showInactive: boolean }): Uint8Array {
+export function renderMatrixAt(project: Project, loader: LoaderComponent, elapsedMs: number, options: FrameOptions): Uint8Array {
   const elapsed = Math.max(0, elapsedMs);
   if (loader.sequenceId) {
     const frames = sequenceOf(project, loader).slice(0, MAX_GIF_FRAMES);
     const index = Math.floor(elapsed / (1000 / frameRate(loader))) % frames.length;
-    return renderFrame({ loader: frames[index], progress: index / frames.length, discrete: true, delayCs: 0 }, options.showInactive);
+    return renderFrame({ loader: frames[index], progress: index / frames.length, discrete: true, delayCs: 0 }, options);
   }
   const durationMs = getCycleDuration(loader);
-  return renderFrame({ loader, progress: (elapsed % durationMs) / durationMs, discrete: false, delayCs: 0 }, options.showInactive);
+  return renderFrame({ loader, progress: (elapsed % durationMs) / durationMs, discrete: false, delayCs: 0 }, options);
 }
 
 /** Samples the shared motion field into 32x32 RGB frames with per-frame GIF delays. */
@@ -155,7 +165,7 @@ export function renderMatrixFrames(project: Project, loader: LoaderComponent, op
   const plans = planFrames(project, loader, options.maxFrames ?? MAX_GIF_FRAMES);
   const totalCs = plans.reduce((sum, plan) => sum + plan.delayCs, 0);
   return {
-    frames: plans.map(plan => renderFrame(plan, options.showInactive)),
+    frames: plans.map(plan => renderFrame(plan, options)),
     delaysCs: plans.map(plan => plan.delayCs),
     fps: Math.round((plans.length * 100 * 10) / Math.max(1, totalCs)) / 10
   };

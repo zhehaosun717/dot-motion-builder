@@ -31,7 +31,7 @@ export function createMatrixMcpServer(client: PanelClient) {
       "'idle' when there is nothing going on. Optional short label (e.g. 'tests', 'deploy').",
     inputSchema: {
       status: z.enum(STATUSES).describe("Work status icon"),
-      label: z.string().max(48).optional().describe("Short ASCII label scrolled under the icon")
+      label: z.string().max(48).optional().describe("Short label under the icon, e.g. 'tests' or '部署' (scrolls if long)")
     }
   }, async ({ status, label }) => report(await client.sendScene({ kind: "status", status, label }), `status "${status}"`));
 
@@ -47,8 +47,9 @@ export function createMatrixMcpServer(client: PanelClient) {
   server.registerTool("show_text", {
     title: "Show short text",
     description:
-      "Show a short message on the 32x32 panel. Up to ~40 characters stays static (8 per line); longer text scrolls. " +
-      "Only ASCII letters, digits and punctuation render; other characters show as '?'.",
+      "Show a short message on the 32x32 panel. Chinese is supported (10px pixel font: up to 9 hanzi stay static as " +
+      "3 lines of 3); ASCII-only text uses a smaller font (up to ~40 characters static, 8 per line). Longer text scrolls. " +
+      "Emoji and rare characters show as '?'.",
     inputSchema: {
       text: z.string().min(1).max(280).describe("Message text"),
       color: z.string().regex(/^#?[0-9a-fA-F]{6}$/).optional().describe("Hex colour like #00FF00")

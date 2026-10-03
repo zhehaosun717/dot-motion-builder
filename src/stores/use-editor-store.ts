@@ -39,6 +39,7 @@ type EditorState = {
   setCellActive: (cellIndex: number, active: boolean) => void;
   toggleCellForLoader: (loaderId: string, cellIndex: number) => void;
   setCellActiveForLoader: (loaderId: string, cellIndex: number, active: boolean) => void;
+  setCellsActiveForLoader: (loaderId: string, cells: number[], active: boolean) => void;
   setPatternSourceType: (sourceType: "template" | "drawn") => void;
   addLoader: (kind?: LoaderKind) => void;
   addSequenceFrame: (sequenceId: string) => void;
@@ -708,6 +709,28 @@ export const useEditorStore = create<EditorState>((set, get) => ({
           pattern: {
             ...loader.pattern,
             activeCells: sanitizeActiveCells(nextCells, loader.pattern.grid)
+          }
+        };
+      });
+
+      saveProject(project);
+      return { project };
+    }),
+  setCellsActiveForLoader: (loaderId, cells, active) =>
+    set((state) => {
+      const project = updateLoaderById(state.project, loaderId, (loader) => {
+        const current = new Set(loader.pattern.activeCells);
+        const changed = cells.filter((cellIndex) => current.has(cellIndex) !== active);
+        if (changed.length === 0) {
+          return loader;
+        }
+        // One store update and one save per stroke/shape, not one per cell.
+        changed.forEach((cellIndex) => (active ? current.add(cellIndex) : current.delete(cellIndex)));
+        return {
+          ...loader,
+          pattern: {
+            ...loader.pattern,
+            activeCells: sanitizeActiveCells([...current], loader.pattern.grid)
           }
         };
       });

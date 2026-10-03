@@ -14,7 +14,7 @@ export type MatrixGif = {
 const MAX_ATTEMPTS = 8;
 
 /** Renders and encodes the loader, halving the frame rate until the GIF fits the panel's comfortable budget. */
-export function buildMatrixGif(project: Project, loader: LoaderComponent, options: { showInactive: boolean }): MatrixGif {
+export function buildMatrixGif(project: Project, loader: LoaderComponent, options: { showInactive: boolean; gaps?: boolean }): MatrixGif {
   let maxFrames = MAX_GIF_FRAMES;
   let result: MatrixGif | null = null;
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
