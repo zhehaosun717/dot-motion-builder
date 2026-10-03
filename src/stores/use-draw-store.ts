@@ -101,8 +101,8 @@ export const useDrawStore = create<DrawState>((set, get) => ({
     saveRecent(recentColors);
   },
   setSymmetry: (value) => set({ symmetry: value }),
-  // A new or cleared selection is no longer the lifted one being moved.
-  setSelection: (selection) => set({ selection, ...(selection ? {} : { floatingLayerId: null }) }),
+  // A new or cleared box is no longer the lifted one being moved (moves update the box directly).
+  setSelection: (selection) => set({ selection, floatingLayerId: null }),
   setFloatingLayer: (layerId) => set({ floatingLayerId: layerId }),
   setPixelClipboard: (clipboard) => set({ pixelClipboard: clipboard, lastCopy: "pixels" }),
   setLastCopy: (kind) => set({ lastCopy: kind })

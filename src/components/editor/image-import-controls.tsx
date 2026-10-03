@@ -27,6 +27,7 @@ const copy = {
     importImage: "导入图片 / GIF",
     importHint: `按当前网格缩放，32×32 时一格一像素；动图会变成序列帧（最多 ${MAX_IMPORT_FRAMES} 帧）`,
     importFailed: "图片读取失败，换一张试试",
+    layersFull: "这个画板的图层已满（16 个），先删除或合并几个图层",
     importing: "正在读取…",
     fit: "适配方式", contain: "完整显示", cover: "铺满裁切",
     blackCut: "暗部截断（更暗的像素不亮）",
@@ -40,6 +41,7 @@ const copy = {
     importImage: "Import Image / GIF",
     importHint: `Scaled to the grid (one pixel per cell at 32×32); animations become sequence frames (up to ${MAX_IMPORT_FRAMES})`,
     importFailed: "Could not read that image",
+    layersFull: "This artboard has the maximum 16 layers; delete or merge some first",
     importing: "Reading…",
     fit: "Fit", contain: "Whole picture", cover: "Fill & crop",
     blackCut: "Black cut (darker pixels stay off)",
@@ -75,7 +77,7 @@ export function ImageImportControls({ language, loader }: ImageImportControlsPro
   // Read when a slow first import finishes, so options changed while it loaded still apply.
   const optionsRef = useRef(options);
   const [lastImport, setLastImport] = useState<LastImport | null>(null);
-  const [status, setStatus] = useState<"idle" | "busy" | "failed">("idle");
+  const [status, setStatus] = useState<"idle" | "busy" | "failed" | "full">("idle");
   const inputRef = useRef<HTMLInputElement>(null);
   const cacheRef = useRef<RasterCache | null>(null);
   const requestRef = useRef(0);
@@ -146,6 +148,10 @@ export function ImageImportControls({ language, loader }: ImageImportControlsPro
           if (useEditorStore.getState().selectedLoaderId === gridSource.id) setMotionPreset("static");
           return id;
         });
+        if (!layerId) {
+          setStatus("full");
+          return;
+        }
         setLastImport({ file, targets: [{ loaderId: gridSource.id, layerId }] });
       }
       setStatus("idle");
@@ -162,7 +168,7 @@ export function ImageImportControls({ language, loader }: ImageImportControlsPro
     if (lastImport) void run(lastImport.file, lastImport.targets);
   }
 
-  const hint = status === "busy" ? t.importing : status === "failed" ? t.importFailed : t.importHint;
+  const hint = status === "busy" ? t.importing : status === "failed" ? t.importFailed : status === "full" ? t.layersFull : t.importHint;
 
   return (
     <div className="image-import-controls">

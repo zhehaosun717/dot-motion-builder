@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import { create } from "zustand";
 import { saveProject } from "@/lib/persistence";
+import { useDrawStore } from "@/stores/use-draw-store";
 import { useEditorStore } from "@/stores/use-editor-store";
 import { Project } from "@/types/dot-motion";
 
@@ -47,6 +48,8 @@ function restore(target: Project) {
   const project = { ...target, canvas: current.canvas };
   const stillThere = !selectedLoaderId || project.loaders.some((loader) => loader.id === selectedLoaderId);
   const selected = stillThere ? selectedLoaderId : project.loaders[0]?.id ?? "";
+  // A selection box (and a lifted layer) may no longer match the restored pixels.
+  useDrawStore.getState().setSelection(null);
   restoring = true;
   try {
     useEditorStore.setState({ project, selectedLoaderId: selected });

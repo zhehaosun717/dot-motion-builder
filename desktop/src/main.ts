@@ -63,7 +63,7 @@ function sendScene(scene: AgentScene, source: SceneSource = "agent") {
 
 /** Agents' editor requests (read or draw artwork) go to the editor window and wait for its answer. */
 const editorRelay = createEditorRelay((message) => {
-  if (!window || !rendererReady) return false;
+  if (!window || window.isDestroyed() || window.webContents.isDestroyed() || !rendererReady) return false;
   window.webContents.send("matrix:editor-request", message);
   return true;
 });

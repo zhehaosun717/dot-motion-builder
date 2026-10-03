@@ -19,7 +19,8 @@ const copy = {
     font: "字体", large: "10px 中文", small: "3×5 小字（英文数字）", scale: "字号（放大倍数）",
     stamp: "写到画布",
     hint: "用画笔颜色写在画面中间，单独成一个图层，可以用方向键挪位置",
-    failed: "文字渲染失败"
+    failed: "文字渲染失败",
+    full: "这个画板的图层已满（16 个），先删除或合并几个图层"
   },
   en: {
     label: "Text",
@@ -27,7 +28,8 @@ const copy = {
     font: "Font", large: "10px (Chinese)", small: "3×5 small (Latin, digits)", scale: "Size (enlargement)",
     stamp: "Write on Canvas",
     hint: "Written in the brush colour, centred, on its own layer; nudge it with the arrow keys",
-    failed: "Could not render the text"
+    failed: "Could not render the text",
+    full: "This artboard has the maximum 16 layers; delete or merge some first"
   }
 } as const;
 
@@ -44,7 +46,7 @@ export function TextStampControls({ language, loader }: TextStampControlsProps) 
   const [scale, setScale] = useState(1);
   const maxScale = MAX_TEXT_SCALE[font];
   const effectiveScale = Math.min(scale, maxScale);
-  const [failed, setFailed] = useState(false);
+  const [problem, setProblem] = useState<"failed" | "full" | null>(null);
   const importCellsForLoader = useEditorStore((state) => state.importCellsForLoader);
   const brushChoice = useDrawStore((state) => state.brushChoice);
   const rememberColor = useDrawStore((state) => state.rememberColor);
@@ -59,13 +61,17 @@ export function TextStampControls({ language, loader }: TextStampControlsProps) 
       if (cells.length) {
         // Each text goes on its own layer named after it, so it can be moved or deleted on its own.
         const colors = Object.fromEntries(cells.map((cell) => [cell, color]));
-        importCellsForLoader(loader.id, cells, colors, { name: text.trim().replace(/\s+/g, " ").slice(0, 20) });
+        const layerId = importCellsForLoader(loader.id, cells, colors, { name: text.trim().replace(/\s+/g, " ").slice(0, 20) });
+        if (!layerId) {
+          setProblem("full");
+          return;
+        }
         rememberColor(color);
       }
-      setFailed(false);
+      setProblem(null);
     } catch (error) {
       console.warn("[editor] text stamp failed", error);
-      setFailed(true);
+      setProblem("failed");
     }
   }
 
@@ -102,7 +108,7 @@ export function TextStampControls({ language, loader }: TextStampControlsProps) 
       />
       <div className="image-import">
         <Button type="button" variant="outline" size="default" disabled={!text.trim()} onClick={() => void stamp()}>{t.stamp}</Button>
-        <span className="image-import__hint">{failed ? t.failed : t.hint}</span>
+        <span className="image-import__hint">{problem ? t[problem] : t.hint}</span>
       </div>
     </div>
   );

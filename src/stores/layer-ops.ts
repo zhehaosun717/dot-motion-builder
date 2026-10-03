@@ -7,6 +7,7 @@ import {
   createLayer,
   flattenLayers,
   layerFromCells,
+  layerPixelAt,
   liftCells,
   mergeLayers,
   offsetLayer,
@@ -23,6 +24,8 @@ export const MAX_LAYERS = 16;
 
 export type LayerState = { layers: PatternLayer[]; activeId: string };
 
+export const baseLayerId = (loader: LoaderComponent) => `${loader.id}:base`;
+
 /** The loader's layers; a drawing from before layers becomes a single unnamed layer on first use. */
 export function layersOf(loader: LoaderComponent): LayerState {
   const existing = loader.pattern.layers;
@@ -32,7 +35,8 @@ export function layersOf(loader: LoaderComponent): LayerState {
       : existing[existing.length - 1].id;
     return { layers: existing, activeId };
   }
-  const layer = layerFromCells("", loader.pattern.activeCells, loader.pattern.cellColors, loader.pattern.grid.cols);
+  // A fixed id: the panel and the store must agree on this stand-in layer across calls.
+  const layer = layerFromCells("", loader.pattern.activeCells, loader.pattern.cellColors, loader.pattern.grid.cols, baseLayerId(loader));
   return { layers: [layer], activeId: layer.id };
 }
 
@@ -47,13 +51,23 @@ export function withLayers(loader: LoaderComponent, layers: PatternLayer[], acti
   };
 }
 
-/** Normalisation for stored or freshly edited loaders: sanitised layers win over the flat cells. */
+/**
+ * Normalisation after every edit: the flat cells are re-derived from the layers, so they can never
+ * disagree. Per-pixel sanitising is costly, so it runs only for stored data (sanitiseStored).
+ */
 export function syncLayers(loader: LoaderComponent): LoaderComponent {
+  const layers = loader.pattern.layers;
+  if (!layers?.length) return loader;
+  return withLayers(loader, layers.slice(0, MAX_LAYERS), loader.pattern.activeLayerId ?? "");
+}
+
+/** Cleans layers read from storage (untrusted): drops malformed layers and pixels. */
+export function sanitiseStoredLayers(loader: LoaderComponent): LoaderComponent {
   const stored = loader.pattern.layers;
   if (!stored?.length) return loader;
   const layers = stored.map((layer, index) => sanitizeLayer(layer, index)).filter((layer): layer is PatternLayer => Boolean(layer)).slice(0, MAX_LAYERS);
   if (!layers.length) return { ...loader, pattern: { ...loader.pattern, layers: undefined, activeLayerId: undefined } };
-  return withLayers(loader, layers, loader.pattern.activeLayerId ?? "");
+  return { ...loader, pattern: { ...loader.pattern, layers } };
 }
 
 function updateLayer(loader: LoaderComponent, layerId: string | null, update: (layer: PatternLayer) => PatternLayer): LoaderComponent {
@@ -111,7 +125,7 @@ export function putCellsOnLayer(
   cells: readonly number[],
   colors: Readonly<Record<string, string>> | undefined,
   target: { layerId?: string; name: string }
-): { loader: LoaderComponent; layerId: string } {
+): { loader: LoaderComponent; layerId: string | null } {
   const { cols } = loader.pattern.grid;
   const { layers, activeId } = layersOf(loader);
   const stored = colors ? Object.fromEntries(Object.entries(colors).map(([cell, hex]) => [cell, storedColor(loader, hex) || ""]).filter(([, hex]) => hex)) : undefined;
@@ -121,9 +135,10 @@ export function putCellsOnLayer(
     const next = layers.map((layer) => (layer.id === existing.id ? { ...replaceLayerCells(layer, cells, stored, cols), offsetX: layer.offsetX, offsetY: layer.offsetY } : layer));
     return { loader: withLayers(loader, next, activeId), layerId: existing.id };
   }
+  // At the layer limit nothing is added (never drop an existing layer to make room).
+  if (layers.length >= MAX_LAYERS) return { loader, layerId: null };
   const layer = layerFromCells(target.name, cells, stored, cols);
-  const kept = layers.length >= MAX_LAYERS ? layers.slice(layers.length - MAX_LAYERS + 1) : layers;
-  return { loader: withLayers(loader, [...kept, layer], layer.id), layerId: layer.id };
+  return { loader: withLayers(loader, [...layers, layer], layer.id), layerId: layer.id };
 }
 
 /** Adds a layer with pixels in grid coordinates (may lie off the grid) on top and makes it active. */
@@ -202,9 +217,15 @@ export function mergeLayerDown(loader: LoaderComponent, layerId: string): Loader
 export function liftToLayer(loader: LoaderComponent, cells: readonly number[], name: string): { loader: LoaderComponent; layerId: string | null } {
   const { layers, activeId } = layersOf(loader);
   if (layers.length >= MAX_LAYERS) return { loader, layerId: null };
-  const index = layers.findIndex((layer) => layer.id === activeId);
-  const { rest, lifted } = liftCells(layers[index], cells, loader.pattern.grid.cols, name);
-  if (!Object.keys(lifted.pixels).length) return { loader, layerId: null };
+  const { cols } = loader.pattern.grid;
+  const hasPixelsIn = (layer: PatternLayer) => cells.some((cell) => layerPixelAt(layer, cell, cols) !== undefined);
+  // Move what you see: the active layer if it has pixels in the box, else the topmost visible one that does.
+  const activeIndex = layers.findIndex((layer) => layer.id === activeId);
+  const fallback = layers.map((layer, i) => i).reverse().find((i) => layers[i].visible && hasPixelsIn(layers[i]));
+  const index = hasPixelsIn(layers[activeIndex]) ? activeIndex : fallback ?? activeIndex;
+  const { rest, lifted: raw } = liftCells(layers[index], cells, cols, name);
+  if (!Object.keys(raw.pixels).length) return { loader, layerId: null };
+  const lifted = { ...raw, visible: layers[index].visible };
   const next = [...layers.slice(0, index), rest, lifted, ...layers.slice(index + 1)];
   return { loader: withLayers(loader, next, lifted.id), layerId: lifted.id };
 }

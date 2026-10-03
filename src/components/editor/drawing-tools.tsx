@@ -83,7 +83,7 @@ export function DrawingTools({ language, loader }: DrawingToolsProps) {
   const setShapeFilled = useDrawStore((state) => state.setShapeFilled);
   const symmetry = useDrawStore((state) => state.symmetry);
   const setSymmetry = useDrawStore((state) => state.setSymmetry);
-  const selection = useDrawStore((state) => state.selection);
+  const selection = useDrawStore((state) => (state.selection?.loaderId === loader.id ? state.selection : null));
   const setSelection = useDrawStore((state) => state.setSelection);
   const hasClipboard = useDrawStore((state) => Boolean(state.pixelClipboard?.pixels.length));
   const canUndo = useHistoryStore((state) => state.canUndo);

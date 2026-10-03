@@ -105,7 +105,7 @@ export function LayersPanel({ language, loader }: LayersPanelProps) {
         <Button type="button" variant="outline" size="default" onClick={act(() => editor.deleteLayer(loader.id, activeId))}>{t.remove}</Button>
         <Button type="button" variant="outline" size="default" disabled={activeIndex >= layers.length - 1} onClick={act(() => editor.reorderLayer(loader.id, activeId, 1))}>{t.up}</Button>
         <Button type="button" variant="outline" size="default" disabled={activeIndex <= 0} onClick={act(() => editor.reorderLayer(loader.id, activeId, -1))}>{t.down}</Button>
-        <Button type="button" variant="outline" size="default" disabled={activeIndex <= 0} onClick={act(() => editor.mergeLayerDown(loader.id, activeId))}>{t.merge}</Button>
+        <Button type="button" variant="outline" size="default" disabled={activeIndex <= 0 || !layers[activeIndex]?.visible} onClick={act(() => editor.mergeLayerDown(loader.id, activeId))}>{t.merge}</Button>
       </div>
       <span className="image-import__hint">{full ? t.full : t.hint}</span>
     </div>

@@ -115,6 +115,9 @@ const liftedLo = ops.liftToLayer(ops.selectLayer(lo, lo.pattern.layers[0].id), [
 assert.equal(liftedLo.loader.pattern.layers.length, 3);
 assert.deepEqual(liftedLo.loader.pattern.activeCells, lo.pattern.activeCells, 'lifting changes nothing visible');
 assert.equal(ops.liftToLayer(lo, [at(7, 7)], 'none').layerId, null, 'nothing to lift');
+const fromBelow = ops.liftToLayer(ops.selectLayer(lo, imported.layerId), [at(1, 1)], 'sel');
+assert(fromBelow.layerId, 'an empty active layer lifts from the visible layer that has the pixels');
+assert.equal(Object.keys(fromBelow.loader.pattern.layers.find(l => l.id === fromBelow.layerId).pixels).length, 1);
 const mergedLo = ops.mergeLayerDown(lo, imported.layerId);
 assert.equal(mergedLo.pattern.layers.length, 1);
 assert.deepEqual(mergedLo.pattern.activeCells, lo.pattern.activeCells, 'merging changes nothing visible');
@@ -125,7 +128,27 @@ assert.deepEqual(ops.fillActiveLayer(single, true).pattern.activeCells.length, 6
 const hiddenLo = ops.setLayerVisible(lo, imported.layerId, false);
 assert(!hiddenLo.pattern.activeCells.includes(at(2, 5)), 'hidden layers do not show');
 const tampered = {...lo, pattern: {...lo.pattern, activeCells: [63], layers: [...lo.pattern.layers, {id: 7}]}};
-assert.deepEqual(ops.syncLayers(tampered).pattern.activeCells, lo.pattern.activeCells, 'stored flat cells cannot disagree with the layers');
+assert.deepEqual(ops.syncLayers(ops.sanitiseStoredLayers(tampered)).pattern.activeCells, lo.pattern.activeCells, 'stored flat cells cannot disagree with the layers');
+assert.deepEqual(ops.syncLayers({...lo, pattern: {...lo.pattern, activeCells: [63]}}).pattern.activeCells, lo.pattern.activeCells, 'every edit re-derives the flat cells');
+
+// Review regressions: a drawing without stored layers keeps one stable layer id, so panel actions land.
+const fresh = {...legacy, pattern: {...legacy.pattern, layers: undefined, activeLayerId: undefined}};
+assert.equal(ops.layersOf(fresh).activeId, ops.layersOf(fresh).activeId, 'the stand-in layer id is stable');
+const freshId = ops.layersOf(fresh).activeId;
+assert.equal(ops.setLayerVisible(fresh, freshId, false).pattern.activeCells.length, 0, 'hiding the stand-in layer works');
+assert.equal(ops.duplicateLayer(fresh, freshId, 'copy').pattern.layers.length, 2, 'duplicating it works');
+assert.equal(ops.renameLayer(fresh, freshId, 'base').pattern.layers[0].name, 'base', 'renaming it works');
+// At the layer limit, imports are refused instead of dropping the bottom layer.
+let crowded = fresh;
+for (let i = 0; i < ops.MAX_LAYERS - 1; i++) crowded = ops.addEmptyLayer(crowded, `L${i}`);
+assert.equal(crowded.pattern.layers.length, ops.MAX_LAYERS);
+const refused = ops.putCellsOnLayer(crowded, [at(7, 7)], {}, {name: 'one too many'});
+assert.equal(refused.layerId, null);
+assert.equal(refused.loader, crowded, 'nothing is dropped');
+assert.deepEqual(crowded.pattern.activeCells, [at(0, 0)], 'the bottom layer keeps its pixels');
+// A lifted selection keeps its source layer's visibility.
+const hiddenSource = ops.setLayerVisible(fresh, freshId, false);
+assert.equal(ops.liftToLayer(hiddenSource, [at(0, 0)], 'sel').loader.pattern.layers[1].visible, false);
 assert.equal(ops.reorderLayer(lo, imported.layerId, 1), lo, 'the top layer cannot move up');
 
 // Agent artwork format: palette rows in and out.

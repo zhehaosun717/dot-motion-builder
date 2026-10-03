@@ -206,6 +206,10 @@ export function DotGridEditor({ loader, onApplyCells, variant = "default" }: Dot
     const { onApplyCells: apply, paintColor: paint } = latest.current;
     const { tool: currentTool } = useDrawStore.getState();
     // The release point counts too: a quick drag can end before a pointermove reports the last cell.
+    // A click without dragging (select tool) clears the box instead of leaving a 1x1 selection.
+    if (stroke.mode === "select" && event.type === "pointerup" && cellFromPointer(event) === stroke.start) {
+      useDrawStore.getState().setSelection(null);
+    }
     if (stroke.mode === "draw" && isShapeTool(currentTool) && event.type === "pointerup") {
       apply(shapeFor(currentTool, stroke.start, cellFromPointer(event), event.shiftKey), stroke.value, paint);
     }

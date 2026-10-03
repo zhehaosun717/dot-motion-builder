@@ -44,7 +44,7 @@ type EditorState = {
    * Puts cells (e.g. an imported image) on a layer: replaces layerId's pixels when that layer exists,
    * otherwise adds a new layer on top. Returns the layer that received them.
    */
-  importCellsForLoader: (loaderId: string, cells: number[], colors: Record<string, string>, target: { layerId?: string; name: string }) => string;
+  importCellsForLoader: (loaderId: string, cells: number[], colors: Record<string, string>, target: { layerId?: string; name: string }) => string | null;
   /** Replaces several layers' pixels in one update and one save (re-applying a GIF import). */
   importCellsForLoaders: (entries: Array<{ loaderId: string; layerId: string; cells: number[]; colors: Record<string, string> }>) => void;
   /** Moves (losslessly), mirrors or rotates the active layer. */
@@ -505,7 +505,7 @@ function normalizeProject(project: Project): Project {
       })),
       templates: []
     },
-    loaders: reindexSequenceLoaders(project.loaders.map((loader, index) => normalizeLoader(loader, index)))
+    loaders: reindexSequenceLoaders(project.loaders.map((loader, index) => normalizeLoader(layerOps.sanitiseStoredLayers(loader), index)))
   };
 }
 
@@ -713,7 +713,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     const project = { ...state.project, updatedAt: new Date().toISOString(), loaders };
     saveProject(project);
     set({ project, selectedLoaderId: created[0].id });
-    return created.map((loader) => ({ loaderId: loader.id, layerId: loader.pattern.activeLayerId ?? "" }));
+    return created.map((loader) => ({ loaderId: loader.id, layerId: loader.pattern.activeLayerId ?? layerOps.baseLayerId(loader) }));
   },
   importCellsForLoaders: (entries) =>
     set((state) => {
@@ -733,7 +733,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       return { project };
     }),
   importCellsForLoader: (loaderId, cells, colors, target) => {
-    let layerId = "";
+    let layerId: string | null = null;
     editLoader(loaderId, (loader) => {
       const result = layerOps.putCellsOnLayer(loader, sanitizeActiveCells(cells, loader.pattern.grid), colors, target);
       layerId = result.layerId;
