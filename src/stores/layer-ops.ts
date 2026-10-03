@@ -110,6 +110,14 @@ export function fillActiveLayer(loader: LoaderComponent, filled: boolean): Loade
   return updateLayer(loader, null, (layer) => (filled ? paintLayer(layer, all, true, cols, "") : { ...layer, pixels: {} }));
 }
 
+/** Drops every per-cell colour (on all layers) so the whole drawing uses the base colour. */
+export function applyBaseColorEverywhere(loader: LoaderComponent): LoaderComponent {
+  const stored = loader.pattern.layers;
+  if (!stored?.length) return { ...loader, pattern: { ...loader.pattern, cellColors: undefined } };
+  const layers = stored.map((layer) => ({ ...layer, pixels: Object.fromEntries(Object.keys(layer.pixels).map((key) => [key, ""])) }));
+  return withLayers(loader, layers, loader.pattern.activeLayerId ?? "");
+}
+
 /** Replaces the whole drawing with one layer (pattern presets). */
 export function replaceDrawing(loader: LoaderComponent, cells: readonly number[], colors?: Record<string, string>): LoaderComponent {
   const layer = layerFromCells("", cells, colors, loader.pattern.grid.cols);

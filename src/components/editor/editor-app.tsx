@@ -15,6 +15,7 @@ import { GridTransform } from "@/lib/grid-transforms";
 import { DRAW_TOOL_KEYS, DrawingTools } from "@/components/editor/drawing-tools";
 import { ImageImportControls } from "@/components/editor/image-import-controls";
 import { PatternLibrarySection } from "@/components/editor/pattern-library-section";
+import { BaseColorControls } from "@/components/editor/base-color-controls";
 import { LayersPanel } from "@/components/editor/layers-panel";
 import { activePixelSelection, copySelection, cutSelection, deleteSelection, nudgeDrawing, pasteSelection } from "@/components/editor/selection-actions";
 import { SaveStatusBanner } from "@/components/editor/save-status-banner";
@@ -292,7 +293,6 @@ export function EditorApp() {
   const selectLoader = useEditorStore((state) => state.selectLoader);
   const clearSelection = useEditorStore((state) => state.clearSelection);
   const setCellsActiveForLoader = useEditorStore((state) => state.setCellsActiveForLoader);
-  // null = paint with the active colour (no per-cell override), so the Active Color control keeps recolouring it.
   const addLoader = useEditorStore((state) => state.addLoader);
   const addSequenceFrame = useEditorStore((state) => state.addSequenceFrame);
   const removeSequenceFrame = useEditorStore((state) => state.removeSequenceFrame);
@@ -311,8 +311,6 @@ export function EditorApp() {
   const setAnimationStyle = useEditorStore(state => state.setAnimationStyle);
   const setFps = useEditorStore((state) => state.setFps);
   const setInactiveStyle = useEditorStore((state) => state.setInactiveStyle);
-  const setPrimaryColor = useEditorStore((state) => state.setPrimaryColor);
-  const setPrimaryAlpha = useEditorStore((state) => state.setPrimaryAlpha);
   const setGlowEnabled = useEditorStore((state) => state.setGlowEnabled);
   const setGlowSize = useEditorStore((state) => state.setGlowSize);
   const setBackgroundColor = useEditorStore((state) => state.setBackgroundColor);
@@ -1144,13 +1142,7 @@ export function EditorApp() {
                   onCollapsedChange={(value) => setCollapsedSections(current => ({ ...current, colors: value }))}
                 >
                   <div className="toolcraft-control-stack">
-                    <ColorOpacityControl
-                      showLabel
-                      name={t.primaryColor}
-                      hex={editingLoader.style.primaryColor}
-                      opacity={(editingLoader.style.primaryAlpha ?? 1) * 100}
-                      onValueChange={({ hex, opacity }) => { setPrimaryColor(hex); setPrimaryAlpha(opacity / 100); }}
-                    />
+                    <BaseColorControls language={language} loader={editingLoader} />
                     <ColorOpacityControl
                       showLabel
                       name={t.backgroundColor}

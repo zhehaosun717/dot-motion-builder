@@ -91,6 +91,8 @@ type EditorState = {
   setInactiveStyle: (value: "none" | "static-dim" | "breathe" | "ghost") => void;
   setPrimaryColor: (value: string) => void;
   setPrimaryAlpha: (value: number) => void;
+  /** Clears all per-cell colours of the selected artboard (and its sequence) so everything uses the base colour. */
+  applyBaseColorEverywhere: () => void;
   setGlowEnabled: (value: boolean) => void;
   setGlowSize: (value: number) => void;
   setBackgroundColor: (value: string) => void;
@@ -1117,6 +1119,12 @@ export const useEditorStore = create<EditorState>((set, get) => {
         }
       }), { updateSequence: true });
 
+      saveProject(project);
+      return { project };
+    }),
+  applyBaseColorEverywhere: () =>
+    set((state) => {
+      const project = updateSelectedLoader(state.project, state.selectedLoaderId, (loader) => layerOps.applyBaseColorEverywhere(loader), { updateSequence: true });
       saveProject(project);
       return { project };
     }),
