@@ -36,9 +36,18 @@ export function cellsInRect(a: number, b: number, cols: number): number[] {
   return cells;
 }
 
-/** The 4-connected region of cells sharing the start cell's on/off state. */
-export function floodFill(start: number, active: ReadonlySet<number>, rows: number, cols: number): number[] {
-  const target = active.has(start);
+/**
+ * The 4-connected region of cells that look like the start cell: same on/off state, or — with keyOf —
+ * the same key (e.g. state plus colour, so a fill stops at a differently coloured area).
+ */
+export function floodFill(
+  start: number,
+  active: ReadonlySet<number>,
+  rows: number,
+  cols: number,
+  keyOf: (cell: number) => string = (cell) => (active.has(cell) ? "on" : "off")
+): number[] {
+  const target = keyOf(start);
   const seen = new Set([start]);
   const queue = [start];
   for (let i = 0; i < queue.length; i++) {
@@ -46,7 +55,7 @@ export function floodFill(start: number, active: ReadonlySet<number>, rows: numb
     const r = rowOf(cell, cols), c = colOf(cell, cols);
     const neighbours = [r > 0 ? cell - cols : -1, r < rows - 1 ? cell + cols : -1, c > 0 ? cell - 1 : -1, c < cols - 1 ? cell + 1 : -1];
     for (const next of neighbours) {
-      if (next < 0 || seen.has(next) || active.has(next) !== target) continue;
+      if (next < 0 || seen.has(next) || keyOf(next) !== target) continue;
       seen.add(next);
       queue.push(next);
     }

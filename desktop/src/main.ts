@@ -1,4 +1,4 @@
-import { app, BrowserWindow, desktopCapturer, DesktopCapturerSource, ipcMain, Menu, MenuItemConstructorOptions, nativeImage, session, Tray } from "electron";
+import { app, BrowserWindow, desktopCapturer, DesktopCapturerSource, ipcMain, Menu, MenuItemConstructorOptions, nativeImage, Tray } from "electron";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import type { Server } from "node:http";
@@ -130,33 +130,50 @@ function installDeviceChooser(win: BrowserWindow) {
 const MAX_WINDOW_CHOICES = 25;
 const truncate = (text: string, max = 48) => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
 
+const CANCEL_GRACE_MS = 300;
+const SOURCE_LIST_TIMEOUT_MS = 10_000;
+
 /**
- * Electron has no built-in screen picker on Windows, so getDisplayMedia (Mirror Screen) would fail.
- * Offer screens and windows in a native menu; closing the menu cancels.
+ * Shows screens and windows in a native menu and resolves the chosen source id (null when cancelled).
+ * The editor captures it with getUserMedia's desktop source constraint, which, unlike getDisplayMedia,
+ * needs neither a display-media handler (Electron cannot deny one without throwing) nor a fresh user gesture.
  */
-function installScreenPicker() {
-  session.defaultSession.setDisplayMediaRequestHandler((_request, callback) => {
-    let answered = false;
-    const answer = (source?: DesktopCapturerSource) => {
-      if (answered) return;
-      answered = true;
-      callback(source ? { video: source } : {});
+async function pickCaptureSource(): Promise<string | null> {
+  const sources = await Promise.race([
+    desktopCapturer.getSources({ types: ["screen", "window"], thumbnailSize: { width: 0, height: 0 } }),
+    new Promise<never>((_, reject) => setTimeout(() => reject(new Error("listing capture sources timed out")), SOURCE_LIST_TIMEOUT_MS))
+  ]);
+  const screens = sources.filter((source) => source.id.startsWith("screen:"));
+  const windows = sources.filter((source) => !source.id.startsWith("screen:") && source.name && !source.name.startsWith(APP_NAME));
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (source: DesktopCapturerSource | null) => {
+      if (settled) return;
+      settled = true;
+      resolve(source ? source.id : null);
     };
-    desktopCapturer.getSources({ types: ["screen", "window"], thumbnailSize: { width: 0, height: 0 } }).then((sources) => {
-      const screens = sources.filter((source) => source.id.startsWith("screen:"));
-      const windows = sources.filter((source) => !source.id.startsWith("screen:") && source.name && !source.name.startsWith(APP_NAME));
-      const items: MenuItemConstructorOptions[] = [
-        { label: "选择要投到点阵屏上的内容", enabled: false },
-        { type: "separator" },
-        ...screens.map((source, i) => ({ label: screens.length > 1 ? `屏幕 ${i + 1}` : "整个屏幕", click: () => answer(source) })),
-        { type: "separator" },
-        ...windows.slice(0, MAX_WINDOW_CHOICES).map((source) => ({ label: truncate(source.name), click: () => answer(source) })),
-        { type: "separator" },
-        { label: "取消", click: () => answer() }
-      ];
-      // The close callback can run before a click handler; defer it so a choice wins.
-      Menu.buildFromTemplate(items).popup({ window: window ?? undefined, callback: () => setTimeout(() => answer(), 0) });
-    }).catch(() => answer());
+    const items: MenuItemConstructorOptions[] = [
+      { label: "选择要投到点阵屏上的内容", enabled: false },
+      { type: "separator" },
+      ...screens.map((source, i) => ({ label: screens.length > 1 ? `屏幕 ${i + 1}` : "整个屏幕", click: () => finish(source) })),
+      { type: "separator" },
+      ...windows.slice(0, MAX_WINDOW_CHOICES).map((source) => ({ label: truncate(source.name), click: () => finish(source) })),
+      { type: "separator" },
+      { label: "取消", click: () => finish(null) }
+    ];
+    // On Windows the close callback can fire before the click handler; give a click time to land.
+    Menu.buildFromTemplate(items).popup({ window: window ?? undefined, callback: () => setTimeout(() => finish(null), CANCEL_GRACE_MS) });
+  });
+}
+
+function installScreenPicker() {
+  ipcMain.handle("matrix:pick-capture", async () => {
+    try {
+      return await pickCaptureSource();
+    } catch (error) {
+      console.error("[desktop] capture source listing failed:", error);
+      return null;
+    }
   });
 }
 

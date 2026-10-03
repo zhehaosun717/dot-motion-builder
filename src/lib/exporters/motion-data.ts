@@ -47,6 +47,10 @@ export function buildMotionData(project: Project, loader: LoaderComponent) {
         x: m.padding + (index % m.cols) * (m.cellSize + m.gap),
         y: m.padding + Math.floor(index / m.cols) * (m.cellSize + m.gap),
         active: active.has(index),
+        // Per-cell colour (pixel art, imported images); absent cells use the scene's primary colour.
+        ...(active.has(index) && frame.pattern.cellColors?.[index]
+          ? { color: color(frame.pattern.cellColors[index], frame.style.primaryAlpha ?? 1) }
+          : {}),
         samples: Array.from({length: count + 1}, (_, step) => {
           const phase = step / count;
           const v = discrete ? {opacity: 1, scale: 1} : sampleMotion(frame, index, phase);

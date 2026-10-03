@@ -13,6 +13,8 @@ export type MatrixDesktopBridge = {
   reportState: (state: DesktopPanelState) => void;
   ready: () => void;
   requestReconnect: () => void;
+  /** Desktop app: native screen/window picker; resolves a desktop capture source id, or null if cancelled. */
+  pickCaptureSource?: () => Promise<string | null>;
 };
 
 export function getDesktopBridge(): MatrixDesktopBridge | null {

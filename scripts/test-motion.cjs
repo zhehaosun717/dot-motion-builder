@@ -15,7 +15,7 @@ const {compileTimeline} = require('../src/lib/core/timeline.ts');
 const {generateExportArtifact} = require('../src/lib/exporters/index.ts');
 const {buildMotionData} = require('../src/lib/exporters/motion-data.ts');
 let checks = 0;
-assert.equal(motionPresets.length, 12, 'sparse-grid-safe preset catalog size');
+assert.equal(motionPresets.length, 13, 'sparse-grid-safe preset catalog size (12 motions + static)');
 const removedPresetIds = [
   'blink', 'pulse', 'ripple', 'spinner', 'orbit', 'equalizer', 'dna', 'sparkle', 'collapse',
   'spiral', 'corners', 'snake', 'typewriter', 'row-scan', 'column-scan', 'matrix', 'box-trace',
@@ -104,7 +104,9 @@ for (const preset of motionPresets) {
     for (let cellIndex = 0; cellIndex < size * size; cellIndex += 1) {
       const samples = Array.from({length:24}, (_, frameIndex) => sampleMotion(loader, cellIndex, frameIndex / 24).opacity);
       assert(Math.max(...samples) >= .2, `${preset.id} must visibly animate ${size}x${size} cell ${cellIndex}`);
-      assert(new Set(samples.map(value => value.toFixed(4))).size > 1, `${preset.id} must vary ${size}x${size} cell ${cellIndex}`);
+      // 'static' is the one preset meant to hold still (pixel art, imported images).
+      if (preset.id === 'static') assert(samples.every(value => value === 1), `static stays fully lit ${size}x${size} cell ${cellIndex}`);
+      else assert(new Set(samples.map(value => value.toFixed(4))).size > 1, `${preset.id} must vary ${size}x${size} cell ${cellIndex}`);
     }
   }
 }

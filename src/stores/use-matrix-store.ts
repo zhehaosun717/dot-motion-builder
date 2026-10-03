@@ -119,7 +119,9 @@ export const useMatrixStore = create<MatrixState>((set, get) => {
           });
         });
         stream = new LiveFrameStream(async (rgb, stillWanted) => {
-          const png = await encodePng(MATRIX_SIZE, MATRIX_SIZE, rgb);
+          // Plain RGB PNGs: indexed PNGs were acknowledged by the panel but showed black in live sync
+          // (user report on v0.2.0), so the panel's decoder is only trusted with what v0.1 proved.
+          const png = await encodePng(MATRIX_SIZE, MATRIX_SIZE, rgb, { allowPalette: false });
           if (stillWanted()) await link.showFrame(png);
         }, {
           onError: (error) => {

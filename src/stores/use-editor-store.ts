@@ -39,7 +39,10 @@ type EditorState = {
   setCellActive: (cellIndex: number, active: boolean) => void;
   toggleCellForLoader: (loaderId: string, cellIndex: number) => void;
   setCellActiveForLoader: (loaderId: string, cellIndex: number, active: boolean) => void;
-  setCellsActiveForLoader: (loaderId: string, cells: number[], active: boolean) => void;
+  /** Lights (optionally with a colour) or clears many cells at once. */
+  setCellsActiveForLoader: (loaderId: string, cells: number[], active: boolean, color?: string) => void;
+  /** Replaces a loader's lit cells and colours, e.g. from an imported image. */
+  importCellsForLoader: (loaderId: string, cells: number[], colors: Record<string, string>) => void;
   setPatternSourceType: (sourceType: "template" | "drawn") => void;
   addLoader: (kind?: LoaderKind) => void;
   addSequenceFrame: (sequenceId: string) => void;
@@ -119,6 +122,18 @@ function sanitizeGrid(grid?: GridConfig): GridConfig {
   };
 }
 
+const HEX_COLOR = /^#[0-9A-F]{6}$/;
+
+/** Keeps colours only for lit cells inside the grid; an empty map is dropped. */
+function sanitizeCellColors(colors: Record<string, string> | undefined, activeCells: number[]) {
+  if (!colors) return undefined;
+  const active = new Set(activeCells);
+  const kept = Object.entries(colors)
+    .map(([key, hex]) => [Number(key), String(hex).toUpperCase()] as const)
+    .filter(([cell, hex]) => active.has(cell) && HEX_COLOR.test(hex));
+  return kept.length ? Object.fromEntries(kept) : undefined;
+}
+
 function sanitizeActiveCells(cells: number[] | undefined, grid: GridConfig) {
   const maxIndex = grid.rows * grid.cols;
   return [...new Set((cells ?? []).filter((cellIndex) => Number.isInteger(cellIndex) && cellIndex >= 0 && cellIndex < maxIndex))].sort(
@@ -160,6 +175,7 @@ function normalizeMotionPresetId(value: unknown, fallbackPresetId: MotionPresetI
     case "radar":
     case "heartbeat":
     case "breathing":
+    case "static":
       return value;
     case "blink":
     case "zigzag":
@@ -389,6 +405,7 @@ function normalizeLoader(loader: LoaderComponent, index: number): LoaderComponen
       ...loader.pattern,
       grid: cloneGrid(grid),
       activeCells,
+      cellColors: sanitizeCellColors(loader.pattern.cellColors, activeCells),
       snapshots: (loader.pattern.snapshots ?? []).map((snapshot) => ({
         ...snapshot,
         rows: snapshot.rows ?? grid.rows,
@@ -716,24 +733,57 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       saveProject(project);
       return { project };
     }),
-  setCellsActiveForLoader: (loaderId, cells, active) =>
+  setCellsActiveForLoader: (loaderId, cells, active, color) =>
     set((state) => {
       const project = updateLoaderById(state.project, loaderId, (loader) => {
         const current = new Set(loader.pattern.activeCells);
-        const changed = cells.filter((cellIndex) => current.has(cellIndex) !== active);
-        if (changed.length === 0) {
+        const colors: Record<string, string> = { ...(loader.pattern.cellColors ?? {}) };
+        // Painting with the active colour stores no override, so changing the active colour still recolours it.
+        const paint = color && color.toUpperCase() !== loader.style.primaryColor.toUpperCase() ? color.toUpperCase() : undefined;
+        let changed = false;
+        for (const cellIndex of cells) {
+          if (!active) {
+            changed = current.delete(cellIndex) || changed;
+            delete colors[cellIndex];
+            continue;
+          }
+          if (!current.has(cellIndex)) {
+            current.add(cellIndex);
+            changed = true;
+          }
+          if (color !== undefined && colors[cellIndex] !== paint) {
+            if (paint) colors[cellIndex] = paint;
+            else delete colors[cellIndex];
+            changed = true;
+          }
+        }
+        if (!changed) {
           return loader;
         }
         // One store update and one save per stroke/shape, not one per cell.
-        changed.forEach((cellIndex) => (active ? current.add(cellIndex) : current.delete(cellIndex)));
         return {
           ...loader,
           pattern: {
             ...loader.pattern,
-            activeCells: sanitizeActiveCells([...current], loader.pattern.grid)
+            activeCells: sanitizeActiveCells([...current], loader.pattern.grid),
+            cellColors: colors
           }
         };
       });
+
+      saveProject(project);
+      return { project };
+    }),
+  importCellsForLoader: (loaderId, cells, colors) =>
+    set((state) => {
+      const project = updateLoaderById(state.project, loaderId, (loader) => ({
+        ...loader,
+        pattern: {
+          ...loader.pattern,
+          activeCells: sanitizeActiveCells(cells, loader.pattern.grid),
+          cellColors: colors
+        }
+      }));
 
       saveProject(project);
       return { project };
@@ -974,7 +1024,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     }),
   setAnimationMode: () => undefined,
   fillGrid: (filled) => set((state) => {
-    const project = updateSelectedLoader(state.project, state.selectedLoaderId, loader => ({...loader, pattern: {...loader.pattern, activeCells: filled ? Array.from({length: loader.pattern.grid.rows * loader.pattern.grid.cols}, (_, i) => i) : []}}));
+    const project = updateSelectedLoader(state.project, state.selectedLoaderId, loader => ({...loader, pattern: {...loader.pattern, activeCells: filled ? Array.from({length: loader.pattern.grid.rows * loader.pattern.grid.cols}, (_, i) => i) : [], cellColors: undefined}}));
     saveProject(project); return {project};
   }),
   setMotionPreset: (presetId) =>
@@ -1268,7 +1318,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         ...loader,
         pattern: {
           ...loader.pattern,
-          activeCells: buildPatternCells(presetId, loader.pattern.grid.rows, loader.pattern.grid.cols)
+          activeCells: buildPatternCells(presetId, loader.pattern.grid.rows, loader.pattern.grid.cols),
+          // A new pattern replaces the drawing, including its colours.
+          cellColors: undefined
         }
       }));
 
@@ -1292,7 +1344,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         pattern: {
           ...loader.pattern,
           grid: nextGrid,
-          activeCells: sanitizeActiveCells(savedPattern.activeCells, nextGrid)
+          activeCells: sanitizeActiveCells(savedPattern.activeCells, nextGrid),
+          cellColors: undefined
         },
         animation: normalizeAnimation(
           {

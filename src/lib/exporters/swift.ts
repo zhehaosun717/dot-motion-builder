@@ -61,6 +61,7 @@ public struct DotMotionView: View {
     private struct Cell: Decodable {
         let x, y: Double
         let active: Bool
+        let color: [Double]?
         let samples: [[Double]]
     }
     private static func color(_ c: [Double]) -> Color {
@@ -86,7 +87,7 @@ public struct DotMotionView: View {
         let size = scene.cellSize * scale
         let inset = (scene.cellSize - size) / 2
         let rect = CGRect(x: cell.x + inset, y: cell.y + inset, width: size, height: size)
-        if glow && scene.glow > 0 { layer.addFilter(.shadow(color: color(scene.glowColor), radius: scene.glow / 2)) }
+        if glow && scene.glow > 0 { layer.addFilter(.shadow(color: color(cell.color ?? scene.glowColor), radius: scene.glow / 2)) }
         layer.fill(path(scene: scene, rect: rect), with: .color(color(fill)))
     }
     private static func render(context: GraphicsContext, size: CGSize, elapsed: Double) {
@@ -106,7 +107,7 @@ public struct DotMotionView: View {
             let a = cell.samples[index], b = cell.samples[index + 1]
             let values = (0..<3).map { a[$0] + (b[$0] - a[$0]) * mix }
             drawCell(context: drawing, scene: scene, cell: cell, scale: 1, opacity: values[2], fill: scene.background, glow: false)
-            if cell.active { drawCell(context: drawing, scene: scene, cell: cell, scale: values[1], opacity: values[0], fill: scene.primary, glow: true) }
+            if cell.active { drawCell(context: drawing, scene: scene, cell: cell, scale: values[1], opacity: values[0], fill: cell.color ?? scene.primary, glow: true) }
         }
         if !scene.label.isEmpty {
             let weight: Font.Weight = scene.fontWeight >= 700 ? .bold : scene.fontWeight >= 600 ? .semibold : scene.fontWeight >= 500 ? .medium : .regular

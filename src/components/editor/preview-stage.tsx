@@ -152,6 +152,7 @@ export function PreviewStage({ loader, showHint = true, isAnimated = true, varia
   const secondaryColor = loader.style.secondaryColor ?? loader.style.primaryColor;
   const primaryColor = rgbaWithOpacity(loader.style.primaryColor, 1, loader.style.primaryAlpha ?? 1);
   const glowColor = loader.style.primaryColor;
+  const cellColors = loader.pattern.cellColors;
   const backgroundColor = rgbaWithOpacity(loader.style.backgroundColor ?? "#2D3743", 1, loader.style.backgroundAlpha ?? 1);
   return (
     <div className={`preview-card preview-card--${loader.layout.type}${canvasVariant ? " preview-card--canvas" : ""}`}>
@@ -199,7 +200,7 @@ export function PreviewStage({ loader, showHint = true, isAnimated = true, varia
             return (
 <span key={cellIndex} style={{position: "absolute", left: x, top: y, width: cellSize, height: cellSize}}>
                 <span className={`preview-loader__cell ${getCellShapeClassName(loader)}`} style={{...shapeStyle, inset: 0, width: cellSize, height: cellSize, background: backgroundColor, opacity: sampleBackground(loader, cellIndex, backgroundPhase)}} />
-                {active && <span className={`preview-loader__cell ${getCellShapeClassName(loader)}`} style={{...shapeStyle, inset: 0, width: cellSize, height: cellSize, background: primaryColor, opacity: visual.opacity, transform: `scale(${visual.scale})`, boxShadow: glow > 0 ? `0 0 ${glow}px ${rgbaWithOpacity(glowColor, .65, loader.style.primaryAlpha ?? 1)}` : "none"}} />}
+                {active && <span className={`preview-loader__cell ${getCellShapeClassName(loader)}`} style={{...shapeStyle, inset: 0, width: cellSize, height: cellSize, background: cellColors?.[cellIndex] ? rgbaWithOpacity(cellColors[cellIndex], 1, loader.style.primaryAlpha ?? 1) : primaryColor, opacity: visual.opacity, transform: `scale(${visual.scale})`, boxShadow: glow > 0 ? `0 0 ${glow}px ${rgbaWithOpacity(cellColors?.[cellIndex] ?? glowColor, .65, loader.style.primaryAlpha ?? 1)}` : "none"}} />}
               </span>
             );
           })}

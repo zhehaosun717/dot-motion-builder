@@ -20,6 +20,8 @@ A Windows desktop app for the **iDotMatrix 32×32 Bluetooth LED panel**. No vend
 
 - Grids from 3×3 to 32×32; at 32×32 one cell is one LED. Smaller grids scale up to fill the panel edge to edge, or with optional gaps for a dot-matrix look.
 - Drawing tools: **Brush (B)**, **Erase (E)**, **Rectangle (R)**, **Bucket fill (G)**. Fast strokes stay continuous.
+- **Multi-colour pixel art**: every cell can have its own colour. Pick a brush colour; Alt+click a cell to sample its colour; bucket fill stops at a different colour.
+- **Import an image**: scaled to the grid without cropping (one pixel per cell at 32×32); transparent and near-black pixels stay off; keep drawing on top. Switches to the Static preset so it shows as is.
 - 12 motion presets (wave, sweep, radar, breathing, heartbeat, …) and frame sequences; colour, opacity, shape and glow controls.
 - Grids above 13×13 render on a canvas, so 32×32 editing and preview stay smooth.
 
@@ -74,7 +76,7 @@ node "%APPDATA%\Dot Matrix Studio\mcp\cli.cjs" text "构建通过"
 
 ## How it works
 
-- **Bluetooth**: the editor talks to the panel over Web Bluetooth. Saving to the panel uploads a GIF in 4 KiB chunks with a 16-byte header, waiting for each chunk's acknowledgement. Live frames are single PNGs in the panel's DIY mode, at most one in flight, sent without inter-packet gaps and backing off if acknowledgements go missing. The protocol follows the DeskDot project's hardware notes and was verified on an `IDM-0384DA` panel.
+- **Bluetooth**: the editor talks to the panel over Web Bluetooth. Saving to the panel uploads a GIF in 4 KiB chunks with a 16-byte header, waiting for each chunk's acknowledgement. Live frames are single RGB PNGs in the panel's DIY mode, at most one in flight, with an 18 ms gap between packets that grows if acknowledgements go missing. The protocol follows the DeskDot project's hardware notes and was verified on an `IDM-0384DA` panel.
 - **Rendering**: the editor's motion sampler renders 32×32 frames, gamma-corrected for linear LED brightness; GIFs use one palette across all frames so colours do not flicker.
 - **Desktop app**: Electron serves the statically exported editor on `127.0.0.1` and owns the Bluetooth link. The local API (default port 47321) requires a random token stored in `%APPDATA%\Dot Matrix Studio\agent-api.json` and a local Host header, so web pages cannot pose as an agent.
 
@@ -95,7 +97,7 @@ Tests cover motion sampling, code export, GIF/PNG encoding and Bluetooth framing
 
 ## Editor code export
 
-The editor still exports self-contained code for each animation. The **Web** export is one dependency-free JavaScript file registering a `<dot-motion-loader>` Web Component (`pause()`, `play()`, `seek()`, `speed` attribute). The **SwiftUI** export is a standalone `DotMotionView.swift` for iOS 15+ / macOS 12+. Both keep the grid, mask, sequence order, shape, colours, glow, speed and sampled motion.
+The editor still exports self-contained code for each animation. The **Web** export is one dependency-free JavaScript file registering a `<dot-motion-loader>` Web Component (`pause()`, `play()`, `seek()`, `speed` attribute). The **SwiftUI** export is a standalone `DotMotionView.swift` for iOS 15+ / macOS 12+. Both keep the grid, mask, sequence order, shape, colours (including per-cell colours), glow, speed and sampled motion.
 
 ## Project structure
 

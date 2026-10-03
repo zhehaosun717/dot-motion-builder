@@ -24,8 +24,10 @@ export type MatrixLinkOptions = {
   /** Entering DIY mode blanks the panel briefly; frames sent sooner can be lost. */
   diySettleMs?: number;
   /**
-   * Starting gap between the packets of a live frame. The user's panel took gap-less frame packets at
-   * ~50 fps with no missed acks (2026-10-03); if frame acks start timing out the gap backs off towards packetGapMs.
+   * Starting gap between the packets of a live frame; if lower than packetGapMs it backs off towards it when
+   * frame acks go missing (with the default both are 18 ms, so there is nothing to back off).
+   * Gap-less packets streamed fine from Python/bleak, but live sync from Web Bluetooth went black with them
+   * (v0.2.0 report), and acks did not reveal it, so the default stays at the proven 18 ms.
    */
   framePacketGapMs?: number;
 };
@@ -49,7 +51,7 @@ const DEFAULT_OPTIONS: Required<MatrixLinkOptions> = {
   retryDelayMs: 50,
   frameAckTimeoutMs: 600,
   diySettleMs: 400,
-  framePacketGapMs: 0
+  framePacketGapMs: 18
 };
 const FRAME_GAP_BACKOFF_MS = 6;
 

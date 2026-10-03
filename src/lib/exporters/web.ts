@@ -72,7 +72,7 @@ class DotMotionLoader extends HTMLElement {
       if (scene.polygon.length) {
         scene.polygon.forEach((n,i,a)=>{if(i%2===0){if(i===0)ctx.moveTo(n*size,a[i+1]*size);else ctx.lineTo(n*size,a[i+1]*size);}}); ctx.closePath();
       } else ctx.roundRect(0,0,size,size,Math.min(size/2,scene.radius*size/scene.cellSize));
-      if(glow){ctx.shadowColor=rgba(scene.glowColor);ctx.shadowBlur=scene.glow*scale;}
+      if(glow){ctx.shadowColor=rgba(item.color||scene.glowColor);ctx.shadowBlur=scene.glow*scale;}
       ctx.fillStyle=rgba(color);ctx.fill();ctx.restore();
     };
     for(const item of scene.cells){
@@ -80,7 +80,7 @@ class DotMotionLoader extends HTMLElement {
       const mix=position-index, a=item.samples[index], b=item.samples[index+1];
       const v=a.map((n,i)=>n+(b[i]-n)*mix);
       cell(item,scene.cellSize,v[2],scene.background,false);
-      if(item.active)cell(item,scene.cellSize*v[1],v[0],scene.primary,true);
+      if(item.active)cell(item,scene.cellSize*v[1],v[0],item.color||scene.primary,true);
     }
     if(scene.label){
       ctx.fillStyle=rgba(scene.textColor);ctx.font=scene.fontWeight+' '+scene.fontSize+'px system-ui';

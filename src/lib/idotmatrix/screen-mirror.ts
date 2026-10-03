@@ -1,5 +1,6 @@
 import { backgroundInterval } from "@/lib/idotmatrix/background-timer";
 import { MATRIX_SIZE } from "@/lib/idotmatrix/constants";
+import { getDesktopBridge } from "@/lib/desktop-bridge";
 
 const PIXELS = MATRIX_SIZE * MATRIX_SIZE;
 /** Raw LEDs wash out sRGB content: linearise and warm it up a little (DeskDot hardware calibration). */
@@ -44,11 +45,25 @@ async function createFrameSource(media: MediaStream): Promise<() => Promise<Fram
 }
 
 /**
+ * In the desktop app the user picks a source from a native menu and it is captured through Electron's
+ * desktop source constraint; in a browser, the browser's own getDisplayMedia picker is used.
+ */
+async function openCapture(): Promise<MediaStream> {
+  const pick = getDesktopBridge()?.pickCaptureSource;
+  if (!pick) return navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 10 }, audio: false });
+  const sourceId = await pick();
+  if (!sourceId) throw new DOMException("Screen pick cancelled", "NotAllowedError");
+  // Capped resolution: the picture ends up 32x32, so capturing a 4K desktop at full size only burns CPU.
+  const desktopVideo = { mandatory: { chromeMediaSource: "desktop", chromeMediaSourceId: sourceId, maxFrameRate: 10, maxWidth: 640, maxHeight: 640 } };
+  return navigator.mediaDevices.getUserMedia({ audio: false, video: desktopVideo as MediaTrackConstraints });
+}
+
+/**
  * Captures a screen, window or tab (the browser asks which) and hands 32x32 frames to onFrame.
  * The whole picture is letterboxed into the square so nothing is cropped.
  */
 export async function startScreenMirror(onFrame: (rgb: Uint8Array) => void, onEnded: () => void): Promise<ScreenMirror> {
-  const media = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 10 }, audio: false });
+  const media = await openCapture();
   const canvas = document.createElement("canvas");
   canvas.width = canvas.height = MATRIX_SIZE;
   let context: CanvasRenderingContext2D;

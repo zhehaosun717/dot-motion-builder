@@ -119,7 +119,8 @@ export const motionPresetCopy: Record<Language, Record<MotionPresetId, { name: s
     "diamond-wave": {name: "菱形扩散", description: "按曼哈顿距离从原点扩散。"},
     radar: {name: "雷达", description: "旋转光束与渐隐尾迹。"},
     heartbeat: {name: "心跳", description: "一强一弱的双脉冲与短暂停顿。"},
-    breathing: {name: "呼吸", description: "所有选中点阵平滑明暗交替。"}
+    breathing: {name: "呼吸", description: "所有选中点阵平滑明暗交替。"},
+    static: {name: "静止", description: "所有点保持常亮，适合静态像素画和导入的图片。"}
   },
   en: {
     wave: { name: "Wave", description: "A staggered wave that travels horizontally, vertically, or diagonally." },
@@ -133,6 +134,7 @@ export const motionPresetCopy: Record<Language, Record<MotionPresetId, { name: s
     "diamond-wave": {name: "Diamond", description: "A Manhattan-distance diamond expands from the origin."},
     radar: {name: "Radar", description: "Rotating beam with a fading trail."},
     heartbeat: {name: "Heartbeat", description: "A strong beat followed by a softer echo."},
-    breathing: {name: "Breathing", description: "Smooth, synchronized breathing."}
+    breathing: {name: "Breathing", description: "Smooth, synchronized breathing."},
+    static: {name: "Static", description: "Cells stay lit: still pixel art and imported images."}
   }
 };

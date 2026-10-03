@@ -11,12 +11,22 @@ import { PreviewStage, SequencePreviewStage } from "@/components/editor/preview-
 import { normalizeCellShape, shapeOptions } from "@/lib/cell-shapes";
 import { MAX_GRID_SIZE, MIN_SLIDER_GRID_SIZE } from "@/lib/grid-limits";
 import { DRAW_TOOLS, DrawTool } from "@/lib/grid-tools";
+import { importImageFile } from "@/lib/image-import";
+import { normalizeHexColor } from "@/lib/colors";
 
 /** Single-key shortcuts for the drawing tools (ignored while typing). */
 const DRAW_TOOL_KEYS: Record<string, DrawTool> = { b: "brush", e: "erase", r: "rect", g: "fill" };
 const drawToolCopy = {
-  cn: { label: "绘制工具", brush: "画笔 B", erase: "橡皮 E", rect: "矩形 R", fill: "填充 G" },
-  en: { label: "Draw tool", brush: "Brush B", erase: "Erase E", rect: "Rect R", fill: "Fill G" }
+  cn: {
+    label: "绘制工具", brush: "画笔 B", erase: "橡皮 E", rect: "矩形 R", fill: "填充 G",
+    brushColor: "画笔颜色（Alt+点击吸色）", importImage: "导入图片",
+    importHint: "按当前网格缩放，32×32 时一格一像素", importFailed: "图片读取失败，换一张试试"
+  },
+  en: {
+    label: "Draw tool", brush: "Brush B", erase: "Erase E", rect: "Rect R", fill: "Fill G",
+    brushColor: "Brush colour (Alt+click picks)", importImage: "Import Image",
+    importHint: "Scaled to the grid; at 32×32 one cell is one pixel", importFailed: "Could not read that image"
+  }
 } as const;
 import { motionPresets } from "@/lib/motion-presets";
 import { inactiveStyleCopy, Language, motionPresetCopy, uiCopy } from "@/lib/ui-copy";
@@ -72,7 +82,9 @@ type CanvasArtboardProps = {
   editable: boolean;
   onSelect: () => void;
   tool: DrawTool;
-  onApplyCells: (cells: number[], active: boolean) => void;
+  brushColor: string;
+  onApplyCells: (cells: number[], active: boolean, color?: string) => void;
+  onPickColor: (hex: string) => void;
   onDuplicate: () => void;
   onDelete: () => void;
   canDelete: boolean;
@@ -88,7 +100,9 @@ function CanvasArtboard({
   editable,
   onSelect,
   tool,
+  brushColor,
   onApplyCells,
+  onPickColor,
   onDuplicate,
   onDelete,
   canDelete,
@@ -163,7 +177,9 @@ function CanvasArtboard({
           <DotGridEditor
             loader={loader}
             tool={tool}
+            brushColor={brushColor}
             onApplyCells={onApplyCells}
+            onPickColor={onPickColor}
             variant="canvas"
           />
         ) : (
@@ -293,6 +309,12 @@ export function EditorApp() {
   const clearSelection = useEditorStore((state) => state.clearSelection);
   const setCellsActiveForLoader = useEditorStore((state) => state.setCellsActiveForLoader);
   const [drawTool, setDrawTool] = useState<DrawTool>("brush");
+  // null = paint with the active colour (no per-cell override), so the Active Color control keeps recolouring it.
+  const [brushChoice, setBrushChoice] = useState<string | null>(null);
+  const setBrushColor = (hex: string) => setBrushChoice(normalizeHexColor(hex));
+  const [importError, setImportError] = useState<string | null>(null);
+  const importInputRef = useRef<HTMLInputElement>(null);
+  const importCellsForLoader = useEditorStore((state) => state.importCellsForLoader);
   const addLoader = useEditorStore((state) => state.addLoader);
   const addSequenceFrame = useEditorStore((state) => state.addSequenceFrame);
   const removeSequenceFrame = useEditorStore((state) => state.removeSequenceFrame);
@@ -506,6 +528,23 @@ export function EditorApp() {
       return;
     }
     setPreviewScope((value) => (value === "selected" ? "none" : "selected"));
+  }
+
+  /** Loads a picture into the selected grid as coloured cells and switches to the Static preset to show it as is. */
+  async function importImage(file: File) {
+    if (!hasSelection) return;
+    const loaderId = editingLoader.id;
+    try {
+      const { rows, cols } = editingLoader.pattern.grid;
+      const { cells, colors } = await importImageFile(file, rows, cols);
+      importCellsForLoader(loaderId, cells, colors);
+      // Decoding is async: only switch the preset if that artboard is still the one selected.
+      if (useEditorStore.getState().selectedLoaderId === loaderId) setMotionPreset("static");
+      setImportError(null);
+    } catch (error) {
+      console.warn("[editor] image import failed", error);
+      setImportError(drawToolCopy[language].importFailed);
+    }
   }
 
   function changeGridSize(value: number) {
@@ -900,7 +939,9 @@ export function EditorApp() {
                   editable={previewScope === "none" && (item.id === selectedLoaderId || Boolean(selectedSequenceId && item.sequenceId === selectedSequenceId))}
                   onSelect={() => selectCanvasLoader(item.id)}
                   tool={drawTool}
-                  onApplyCells={(cells, active) => setCellsActiveForLoader(item.id, cells, active)}
+                  brushColor={brushChoice ?? item.style.primaryColor}
+                  onApplyCells={(cells, active, color) => setCellsActiveForLoader(item.id, cells, active, color)}
+                  onPickColor={setBrushColor}
                   onDuplicate={duplicateSelectedLoader}
                   onDelete={deleteSelectedLoader}
                   canDelete={
@@ -959,6 +1000,30 @@ export function EditorApp() {
                         if ((DRAW_TOOLS as readonly string[]).includes(value)) setDrawTool(value as DrawTool);
                       }}
                     />
+                    <ColorOpacityControl
+                      showLabel
+                      name={drawToolCopy[language].brushColor}
+                      hex={brushChoice ?? editingLoader.style.primaryColor}
+                      opacity={100}
+                      onValueChange={({ hex }) => setBrushColor(hex)}
+                    />
+                    <div className="image-import">
+                      <Button type="button" variant="outline" size="default" onClick={() => importInputRef.current?.click()}>
+                        {drawToolCopy[language].importImage}
+                      </Button>
+                      <span className="image-import__hint">{importError ?? drawToolCopy[language].importHint}</span>
+                      <input
+                        ref={importInputRef}
+                        type="file"
+                        accept="image/*"
+                        hidden
+                        onChange={(event) => {
+                          const file = event.target.files?.[0];
+                          event.target.value = "";
+                          if (file) void importImage(file);
+                        }}
+                      />
+                    </div>
                     <SliderControl showFill variant="discrete" markerCount={11} name={t.gridSize} min={MIN_SLIDER_GRID_SIZE} max={MAX_GRID_SIZE} step={1} value={editingLoader.pattern.grid.rows} valueLabel={`${editingLoader.pattern.grid.rows}×${editingLoader.pattern.grid.cols}`} onValueChange={changeGridSize} />
                     <SelectControl
                       name={t.shape}

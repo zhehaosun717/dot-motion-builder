@@ -71,8 +71,9 @@ export function DenseCellCanvas({ loader, cellSize, gap, width, height, isAnimat
     const pitch = cellSize + gap;
 
     const drawActive = (target: CanvasRenderingContext2D, progress: number) => {
-      target.fillStyle = style.primaryColor;
+      const cellColors = loader.pattern.cellColors;
       for (const index of active) {
+        target.fillStyle = cellColors?.[index] ?? style.primaryColor;
         const motion = staticOnly || !isAnimated ? { opacity: 1, scale: 1 } : sampleMotion(loader, index, progress);
         if (motion.opacity <= 0 || motion.scale <= 0) continue;
         const size = cellSize * motion.scale;

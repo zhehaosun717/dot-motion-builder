@@ -41,4 +41,30 @@ assert.equal(cellAtPoint(100 + 2 * (10 + 22), 50 + 2 * (10 + 5), geometry), at(0
 assert.equal(cellAtPoint(0, 0, geometry), at(0, 0), 'points outside clamp to the grid');
 assert.equal(cellAtPoint(99999, 99999, geometry), at(7, 7));
 
+// Colour-aware bucket fill: a region is cells that look the same (state + colour).
+const colours = {[at(0, 0)]: '#FF0000', [at(0, 1)]: '#FF0000', [at(0, 2)]: '#00FF00'};
+const lit = new Set([at(0, 0), at(0, 1), at(0, 2)]);
+const keyOf = cell => (lit.has(cell) ? colours[cell] ?? '#PRIMARY' : 'off');
+assert.deepEqual(floodFill(at(0, 0), lit, rows, cols, keyOf).sort((a, b) => a - b), [at(0, 0), at(0, 1)], 'fill stops at a different colour');
+
+// Image import: pixels -> lit cells with their colours; transparent and near-black stay off.
+const {pixelsToCells} = require('../src/lib/image-import.ts');
+const rgba = new Uint8ClampedArray(2 * 2 * 4);
+rgba.set([255, 0, 0, 255], 0);        // red
+rgba.set([0, 0, 0, 255], 4);          // black -> off (an unlit LED)
+rgba.set([0, 128, 255, 10], 8);       // nearly transparent -> off
+rgba.set([250, 250, 250, 255], 12);   // white
+const imported = pixelsToCells(rgba, 2, 2);
+assert.deepEqual(imported.cells, [0, 3]);
+assert.deepEqual(imported.colors, {0: '#FF0000', 3: '#FAFAFA'});
+
+// Static preset: every cell fully lit at all times (for still pixel art and imported images).
+const {sampleMotion} = require('../src/lib/core/motion-sampler.ts');
+const {createMockProject} = require('../src/lib/mock-project.ts');
+const {getDefaultMotionConfig, motionPresets} = require('../src/lib/motion-presets.ts');
+assert(motionPresets.some(p => p.id === 'static'), 'static preset is offered');
+const still = structuredClone(createMockProject().loaders[0]);
+still.animation = {...still.animation, ...getDefaultMotionConfig('static')};
+for (const t of [0, 0.3, 0.77]) assert.deepEqual(sampleMotion(still, 5, t), {opacity: 1, scale: 1}, 'static never dims');
+
 console.log('PASS: editor tools — continuous strokes, rectangles, flood fill, pointer mapping.');

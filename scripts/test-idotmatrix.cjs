@@ -167,6 +167,15 @@ async function main() {
   assert.deepEqual(pixel(lit, cx + Math.floor(layout3.cell / 2), cy + Math.floor(layout3.cell / 2)), orange, 'circle centre lit');
   assert(pixel(lit, cx, cy)[0] < orange[0], 'circle corners are cut');
 
+  // ------------------------------------------------------------ per-cell colours (pixel art, imported images)
+  const painted = makeLoader(32, 'static', [0, 1, 2]);
+  painted.pattern.cellColors = {1: '#00FF00', 2: '#123456'};
+  const paintedFrame = renderMatrixFrames(projectWith(painted), painted, {showInactive: false}).frames[0];
+  assert.deepEqual(pixel(paintedFrame, 0, 0), orange, 'cells without a colour use the active colour');
+  assert.deepEqual(pixel(paintedFrame, 1, 0), [0, 255, 0], 'a painted cell keeps its own colour');
+  assert.deepEqual(pixel(paintedFrame, 2, 0), [0x12, 0x34, 0x56]);
+  assert.deepEqual(pixel(paintedFrame, 3, 0), [0, 0, 0]);
+
   // ------------------------------------------------------------ 32x32 grids: one cell per LED
   assert.equal(MAX_GRID_SIZE, MATRIX_SIZE, 'editor grids go up to the panel resolution');
   assert.deepEqual(getMatrixLayout(32, 32), {cell: 1, gap: 0, offsetX: 0, offsetY: 0}, '32x32 maps 1:1 onto the LEDs');
@@ -210,6 +219,16 @@ async function main() {
   const reduced = decodeGif(encodeGif(MATRIX_SIZE, MATRIX_SIZE, noisy));
   assert(reduced.palette.length <= 256 * 3, 'palette capped at 256 colours');
   reduced.frames.forEach((frame, f) => toRgb(reduced, frame).forEach((v, i) => assert(Math.abs(v - noisy[f].rgb[i]) <= 18, 'colour reduction stays close')));
+
+  // Photo-like frames (imported images) with >256 colours: median cut keeps dark tones instead of crushing them.
+  const darkPhoto = Uint8Array.from({length: N * 3}, (_, i) => { const p = Math.floor(i / 3); return [p & 15, (p >> 4) & 15, (p >> 8) * 3 + (p & 1)][i % 3]; });
+  const darkDecoded = decodeGif(encodeGif(MATRIX_SIZE, MATRIX_SIZE, [{rgb: darkPhoto, delayCs: 10}]));
+  const darkRgb = toRgb(darkDecoded, darkDecoded.frames[0]);
+  let darkError = 0, crushed = 0;
+  for (let i = 0; i < darkPhoto.length; i++) darkError += Math.abs(darkRgb[i] - darkPhoto[i]);
+  for (let px = 0; px < N; px++) if (darkPhoto[px * 3] + darkPhoto[px * 3 + 1] + darkPhoto[px * 3 + 2] > 0 && darkRgb[px * 3] + darkRgb[px * 3 + 1] + darkRgb[px * 3 + 2] === 0) crushed++;
+  assert(darkError / darkPhoto.length < 4, `dark photo stays close (mean error ${(darkError / darkPhoto.length).toFixed(2)})`);
+  assert.equal(crushed, 0, 'no lit pixel is crushed to black');
 
   // ------------------------------------------------------------ budget + presets
   for (const preset of motionPresets) for (const size of [2, 6, 13, 32]) {

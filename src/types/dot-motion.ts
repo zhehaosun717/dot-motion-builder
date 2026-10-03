@@ -25,7 +25,8 @@ export type MotionPresetId =
   | "diamond-wave"
   | "radar"
   | "heartbeat"
-  | "breathing";
+  | "breathing"
+  | "static";
 export type CellShape =
   | "rectangle"
   | "triangle"
@@ -96,6 +97,8 @@ export type ArtboardConfig = {
 export type PatternConfig = {
   grid: GridConfig;
   activeCells: number[];
+  /** Per-cell colour overrides (#RRGGBB) for lit cells; cells without one use the active colour. */
+  cellColors?: Record<string, string>;
   snapshots: PatternSnapshot[];
   sourceType: "drawn" | "template" | "generated";
   presetId?: PatternPresetId | "custom";

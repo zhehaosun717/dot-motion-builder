@@ -2465,3 +2465,17 @@ select {
 .dot-grid--tool-fill .dot-grid__cell {
   cursor: copy;
 }
+
+/* Image import in the Grid section. */
+.image-import {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.image-import__hint {
+  color: var(--app-muted);
+  font-size: 0.74rem;
+  line-height: 1.4;
+}

@@ -92,6 +92,9 @@ export function sampleMotion(loader: LoaderComponent, cellIndex: number, progres
     case "breathing":
       brightness = .2 + wave(angle - Math.PI / 2) * .8;
       break;
+    case "static":
+      brightness = 1;
+      break;
     case "pinwheel":
       brightness = Math.pow(wave(Math.atan2(y, x) * 2 - angle), 3) * Math.max(.35, 1 - centerDistance / (radius * 1.5));
       break;

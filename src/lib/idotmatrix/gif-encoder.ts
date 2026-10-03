@@ -1,3 +1,5 @@
+import { medianCutPalette, nearestIndex } from "@/lib/idotmatrix/color-quantizer";
+
 export type GifFrame = {
   /** RGB bytes, width * height * 3. */
   rgb: Uint8Array;
@@ -10,38 +12,39 @@ const MAX_CODES = 4096;
 
 type IndexedFrames = { palette: number[]; frames: Uint8Array[] };
 
-function reduceChannel(value: number, bits: number) {
-  if (bits >= 8) return value;
-  const levels = (1 << bits) - 1;
-  return Math.round(Math.round((value / 255) * levels) * 255 / levels);
-}
+const keyOf = (rgb: Uint8Array, i: number) => (rgb[i * 3] << 16) | (rgb[i * 3 + 1] << 8) | rgb[i * 3 + 2];
 
 /**
  * One palette shared by every frame: per-frame palettes make LED colours jump between frames.
- * Exact colours are kept when they fit; otherwise channel precision drops until they do.
+ * Exact colours are kept when they fit; otherwise a median-cut palette is built and pixels map to the
+ * nearest entry.
  */
 function indexFrames(frames: GifFrame[]): IndexedFrames {
-  for (let bits = 8; bits >= 1; bits--) {
-    const lookup = new Map<number, number>();
-    const palette: number[] = [];
-    const indexed = frames.map(({ rgb }) => {
-      const out = new Uint8Array(rgb.length / 3);
-      for (let i = 0; i < out.length && lookup.size <= MAX_COLORS; i++) {
-        const r = reduceChannel(rgb[i * 3], bits), g = reduceChannel(rgb[i * 3 + 1], bits), b = reduceChannel(rgb[i * 3 + 2], bits);
-        const key = (r << 16) | (g << 8) | b;
-        let index = lookup.get(key);
-        if (index === undefined) {
-          index = lookup.size;
-          lookup.set(key, index);
-          palette.push(r, g, b);
-        }
-        out[i] = index;
-      }
-      return out;
-    });
-    if (lookup.size <= MAX_COLORS) return { palette, frames: indexed };
+  const counts = new Map<number, number>();
+  for (const { rgb } of frames) {
+    for (let i = 0; i < rgb.length / 3; i++) {
+      const key = keyOf(rgb, i);
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
   }
-  throw new Error("unreachable: 1-bit channels always fit the palette");
+  const lookup = new Map<number, number>();
+  let palette: number[];
+  if (counts.size <= MAX_COLORS) {
+    palette = [];
+    for (const key of counts.keys()) {
+      lookup.set(key, palette.length / 3);
+      palette.push((key >> 16) & 255, (key >> 8) & 255, key & 255);
+    }
+  } else {
+    palette = medianCutPalette(counts, MAX_COLORS);
+    for (const key of counts.keys()) lookup.set(key, nearestIndex(palette, (key >> 16) & 255, (key >> 8) & 255, key & 255));
+  }
+  const indexed = frames.map(({ rgb }) => {
+    const out = new Uint8Array(rgb.length / 3);
+    for (let i = 0; i < out.length; i++) out[i] = lookup.get(keyOf(rgb, i)) as number;
+    return out;
+  });
+  return { palette, frames: indexed };
 }
 
 /** GIF LZW, variable code width with the encoder-side early size bump the decoder expects. */

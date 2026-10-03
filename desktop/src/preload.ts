@@ -10,7 +10,8 @@ const bridge: MatrixDesktopBridge = {
   },
   reportState: (state: DesktopPanelState) => ipcRenderer.send("matrix:state", state),
   ready: () => ipcRenderer.send("matrix:ready"),
-  requestReconnect: () => ipcRenderer.send("matrix:request-connect")
+  requestReconnect: () => ipcRenderer.send("matrix:request-connect"),
+  pickCaptureSource: () => ipcRenderer.invoke("matrix:pick-capture") as Promise<string | null>
 };
 
 contextBridge.exposeInMainWorld("matrixDesktop", bridge);

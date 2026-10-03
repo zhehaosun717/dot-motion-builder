@@ -20,6 +20,7 @@ const FADE_GAMMA = 2.2;
 const ACTIVE_LEVELS = 24;
 const INACTIVE_LEVELS = 6;
 const SUPERSAMPLE = 4;
+const STILL_DURATION_MS = 1000;
 
 const clamp = (n: number, min: number, max: number) => Math.min(max, Math.max(min, n));
 const gapFor = (cell: number) => Math.max(1, Math.floor(cell / 5));
@@ -71,8 +72,10 @@ function planFrames(project: Project, loader: LoaderComponent, maxFrames: number
     const frames = sequenceOf(project, loader).slice(0, maxFrames);
     return frames.map((item, i) => ({ loader: item, progress: i / frames.length, discrete: true, delayCs: Math.round(100 / fps) }));
   }
-  const durationMs = getCycleDuration(loader);
-  const count = clamp(Math.round((durationMs / 1000) * fps), 2, maxFrames);
+  // A still picture over a still background needs no animation frames (2 keeps the GIF looping normally).
+  const still = loader.animation.presetId === "static" && ["none", "static-dim"].includes(loader.animation.inactiveStyle);
+  const durationMs = still ? STILL_DURATION_MS : getCycleDuration(loader);
+  const count = still ? 2 : clamp(Math.round((durationMs / 1000) * fps), 2, maxFrames);
   const totalCs = Math.round(durationMs / 10);
   return Array.from({ length: count }, (_, i) => ({
     loader,
@@ -82,8 +85,11 @@ function planFrames(project: Project, loader: LoaderComponent, maxFrames: number
   }));
 }
 
-/** Rasterises one (optionally scaled) dot into a coverage buffer, keeping the brighter value on overlap. */
-function paintDot(target: Float32Array, style: FrameStyle, x0: number, y0: number, scale: number, alpha: number) {
+/**
+ * Rasterises one (optionally scaled) dot into a coverage buffer, keeping the brighter value on overlap.
+ * With a colour buffer, the winning dot's colour is recorded per pixel (per-cell colours).
+ */
+function paintDot(target: Float32Array, style: FrameStyle, x0: number, y0: number, scale: number, alpha: number, paint?: { colors: Uint8Array; rgb: RgbColor }) {
   if (alpha <= 0 || scale <= 0) return;
   const { cell } = style.layout;
   const reach = Math.ceil((cell * (Math.max(scale, 1) - 1)) / 2);
@@ -97,21 +103,25 @@ function paintDot(target: Float32Array, style: FrameStyle, x0: number, y0: numbe
         if (u >= 0 && u <= 1 && v >= 0 && v <= 1 && style.mask(u, v)) hits++;
       }
       const index = py * MATRIX_SIZE + px;
-      target[index] = Math.max(target[index], (alpha * hits) / samples);
+      const coverage = (alpha * hits) / samples;
+      if (coverage <= target[index]) continue;
+      target[index] = coverage;
+      if (paint) paint.colors.set([paint.rgb.r, paint.rgb.g, paint.rgb.b], index * 3);
     }
   }
 }
 
 const toLevel = (value: number, levels: number) => Math.round(clamp(value, 0, 1) ** FADE_GAMMA * levels) / levels;
 
-function compose(active: Float32Array, inactive: Float32Array, style: FrameStyle) {
+function compose(active: Float32Array, activeColors: Uint8Array, inactive: Float32Array, style: FrameStyle) {
   const rgb = new Uint8Array(PIXELS * 3);
   for (let i = 0; i < PIXELS; i++) {
     const a = toLevel(active[i], ACTIVE_LEVELS);
     const b = toLevel(inactive[i], INACTIVE_LEVELS) * (1 - a);
-    rgb[i * 3] = Math.round(style.primary.r * a + style.inactive.r * b);
-    rgb[i * 3 + 1] = Math.round(style.primary.g * a + style.inactive.g * b);
-    rgb[i * 3 + 2] = Math.round(style.primary.b * a + style.inactive.b * b);
+    for (let c = 0; c < 3; c++) {
+      const inactiveChannel = c === 0 ? style.inactive.r : c === 1 ? style.inactive.g : style.inactive.b;
+      rgb[i * 3 + c] = Math.round(activeColors[i * 3 + c] * a + inactiveChannel * b);
+    }
   }
   return rgb;
 }
@@ -127,8 +137,18 @@ function renderFrame(plan: FramePlan, { showInactive, gaps }: FrameOptions) {
     mask: getShapeMask(loader.style.cellShape, loader.style.innerRadius, layout.cell)
   };
   const active = new Float32Array(PIXELS);
+  const activeColors = new Uint8Array(PIXELS * 3);
   const inactive = new Float32Array(PIXELS);
   const activeCells = new Set(loader.pattern.activeCells);
+  const cellColors = loader.pattern.cellColors ?? {};
+  const colorCache = new Map<string, RgbColor>();
+  const colorOf = (cellIndex: number) => {
+    const hex = cellColors[cellIndex];
+    if (!hex) return style.primary;
+    let rgb = colorCache.get(hex);
+    if (!rgb) colorCache.set(hex, (rgb = hexToRgb(hex)));
+    return rgb;
+  };
   for (let cellIndex = 0; cellIndex < rows * cols; cellIndex++) {
     const x0 = layout.offsetX + (cellIndex % cols) * (layout.cell + layout.gap);
     const y0 = layout.offsetY + Math.floor(cellIndex / cols) * (layout.cell + layout.gap);
@@ -137,10 +157,10 @@ function renderFrame(plan: FramePlan, { showInactive, gaps }: FrameOptions) {
     }
     if (activeCells.has(cellIndex)) {
       const motion = discrete ? { opacity: 1, scale: 1 } : sampleMotion(loader, cellIndex, progress);
-      paintDot(active, style, x0, y0, motion.scale, (loader.style.primaryAlpha ?? 1) * motion.opacity);
+      paintDot(active, style, x0, y0, motion.scale, (loader.style.primaryAlpha ?? 1) * motion.opacity, { colors: activeColors, rgb: colorOf(cellIndex) });
     }
   }
-  return compose(active, inactive, style);
+  return compose(active, activeColors, inactive, style);
 }
 
 /** The drawn pattern as it looks while editing: active cells fully lit, inactive dots at rest. */

@@ -21,7 +21,8 @@ export const motionPresets: MotionPreset[] = [
   preset("checkerboard", "Parity groups alternate in a checker rhythm."),
   preset("heartbeat", "A strong beat is followed by a softer echo."),
   preset("breathing", "All selected cells breathe together."),
-  preset("pinwheel", "Angular lobes rotate around the center.")
+  preset("pinwheel", "Angular lobes rotate around the center."),
+  preset("static", "Cells stay fully lit: still pixel art and imported images.")
 ];
 
 const defaultOverrides: Partial<Record<MotionPresetId, Partial<AnimationConfig>>> = {
@@ -31,7 +32,8 @@ const defaultOverrides: Partial<Record<MotionPresetId, Partial<AnimationConfig>>
   bloom: { style: "bloom-pop", scaleIntensity: .7 },
   heartbeat: { style: "pulse-size", scaleIntensity: .35 },
   breathing: { style: "pulse-size", scaleIntensity: .28 },
-  pinwheel: { style: "pulse-size", scaleIntensity: .3 }
+  pinwheel: { style: "pulse-size", scaleIntensity: .3 },
+  static: { style: "opacity-only", scaleIntensity: 0, inactiveStyle: "static-dim" }
 };
 
 export function getDefaultMotionConfig(presetId: AnimationConfig["presetId"]): Partial<AnimationConfig> {
