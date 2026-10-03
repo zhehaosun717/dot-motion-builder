@@ -3,11 +3,13 @@
 import { create } from "zustand";
 import { normalizeCellShape } from "@/lib/cell-shapes";
 import { MAX_GRID_SIZE, MIN_GRID_SIZE, MIN_SLIDER_GRID_SIZE } from "@/lib/grid-limits";
-import { GridTransform, transformPattern } from "@/lib/grid-transforms";
+import { GridTransform } from "@/lib/grid-transforms";
+import { createLayer } from "@/lib/layers";
 import { createMockProject, PROJECT_VERSION } from "@/lib/mock-project";
 import { getDefaultMotionConfig } from "@/lib/motion-presets";
 import { buildPatternCells } from "@/lib/pattern-presets";
 import { loadProject, saveProject } from "@/lib/persistence";
+import * as layerOps from "@/stores/layer-ops";
 import {
   AnimationConfig,
   AnimationMode,
@@ -36,24 +38,36 @@ type EditorState = {
   hydrate: () => void;
   selectLoader: (loaderId: string) => void;
   clearSelection: () => void;
-  toggleCell: (cellIndex: number) => void;
-  setCellActive: (cellIndex: number, active: boolean) => void;
-  toggleCellForLoader: (loaderId: string, cellIndex: number) => void;
-  setCellActiveForLoader: (loaderId: string, cellIndex: number, active: boolean) => void;
-  /** Lights (optionally with a colour) or clears many cells at once. */
+  /** Lights (optionally with a colour) or clears many cells on the active layer. */
   setCellsActiveForLoader: (loaderId: string, cells: number[], active: boolean, color?: string) => void;
-  /** Replaces a loader's lit cells and colours, e.g. from an imported image. */
-  importCellsForLoader: (loaderId: string, cells: number[], colors: Record<string, string>) => void;
-  /** Replaces several loaders' drawings in one update and one save (re-applying a GIF import). */
-  importCellsForLoaders: (entries: Array<{ loaderId: string; cells: number[]; colors: Record<string, string> }>) => void;
-  /** Moves, mirrors or rotates a loader's whole drawing. */
+  /**
+   * Puts cells (e.g. an imported image) on a layer: replaces layerId's pixels when that layer exists,
+   * otherwise adds a new layer on top. Returns the layer that received them.
+   */
+  importCellsForLoader: (loaderId: string, cells: number[], colors: Record<string, string>, target: { layerId?: string; name: string }) => string;
+  /** Replaces several layers' pixels in one update and one save (re-applying a GIF import). */
+  importCellsForLoaders: (entries: Array<{ loaderId: string; layerId: string; cells: number[]; colors: Record<string, string> }>) => void;
+  /** Moves (losslessly), mirrors or rotates the active layer. */
   transformLoaderCells: (loaderId: string, op: GridTransform) => void;
   /**
    * Creates a new frame sequence (e.g. from an animated GIF) next to the given artboard, one frame per
-   * entry, and selects its first frame. Returns the new frames' ids in order.
+   * entry, and selects its first frame. Returns each new frame and the layer holding its picture.
    */
-  importSequence: (baseLoaderId: string, frames: Array<{ cells: number[]; colors: Record<string, string> }>, fps: number) => string[];
+  importSequence: (baseLoaderId: string, frames: Array<{ cells: number[]; colors: Record<string, string> }>, fps: number) => Array<{ loaderId: string; layerId: string }>;
   deleteSavedPattern: (patternId: string) => void;
+  addLayer: (loaderId: string, name: string) => void;
+  duplicateLayer: (loaderId: string, layerId: string, name: string) => void;
+  deleteLayer: (loaderId: string, layerId: string) => void;
+  selectLayer: (loaderId: string, layerId: string) => void;
+  setLayerVisible: (loaderId: string, layerId: string, visible: boolean) => void;
+  renameLayer: (loaderId: string, layerId: string, name: string) => void;
+  reorderLayer: (loaderId: string, layerId: string, direction: 1 | -1) => void;
+  mergeLayerDown: (loaderId: string, layerId: string) => void;
+  moveLayerBy: (loaderId: string, layerId: string, dx: number, dy: number) => void;
+  /** Moves the active layer's pixels under the cells to a new layer above it; returns its id, or null. */
+  liftToLayer: (loaderId: string, cells: number[], name: string) => string | null;
+  /** Adds a layer from pixels keyed "x,y" in grid coordinates (#RRGGBB); returns its id, or null when full. */
+  addLayerFromPixels: (loaderId: string, name: string, pixels: Record<string, string>) => string | null;
   setPatternSourceType: (sourceType: "template" | "drawn") => void;
   addLoader: (kind?: LoaderKind) => void;
   addSequenceFrame: (sequenceId: string) => void;
@@ -397,7 +411,8 @@ function normalizeLoader(loader: LoaderComponent, index: number): LoaderComponen
   const animation = normalizeAnimation(loader.animation, grid, loader.animation.presetId ?? "wave");
   const activeCells = sanitizeActiveCells(loader.pattern.activeCells, grid);
 
-  return {
+  // With layers, the flat cells are re-derived from them (the layers are the source of truth).
+  return layerOps.syncLayers({
     ...loader,
     id: loader.id ?? crypto.randomUUID(),
     name: loader.name || `Loader ${index + 1}`,
@@ -466,7 +481,7 @@ function normalizeLoader(loader: LoaderComponent, index: number): LoaderComponen
     effects: {
       shimmer: loader.effects?.shimmer ?? false
     }
-  };
+  });
 }
 
 function normalizeProject(project: Project): Project {
@@ -632,7 +647,16 @@ function updateLoaderById(
 
 const initialProject = normalizeProject(createMockProject());
 
-export const useEditorStore = create<EditorState>((set, get) => ({
+export const useEditorStore = create<EditorState>((set, get) => {
+  /** Applies one edit to one loader, normalises it and saves; returns nothing. */
+  const editLoader = (loaderId: string, edit: (loader: LoaderComponent) => LoaderComponent) =>
+    set((state) => {
+      const project = updateLoaderById(state.project, loaderId, edit);
+      saveProject(project);
+      return { project };
+    });
+
+  return {
   hydrated: false,
   project: initialProject,
   selectedLoaderId: initialProject.loaders[0]?.id ?? "",
@@ -663,146 +687,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
   selectLoader: (loaderId) => set({ selectedLoaderId: loaderId }),
   clearSelection: () => set({ selectedLoaderId: "", focusModeLoaderId: null }),
-  toggleCell: (cellIndex) =>
-    set((state) => {
-      const project = updateSelectedLoader(state.project, state.selectedLoaderId, (loader) => {
-        const hasCell = loader.pattern.activeCells.includes(cellIndex);
-        const nextCells = hasCell
-          ? loader.pattern.activeCells.filter((value) => value !== cellIndex)
-          : [...loader.pattern.activeCells, cellIndex].sort((left, right) => left - right);
-
-        return {
-          ...loader,
-          pattern: {
-            ...loader.pattern,
-            activeCells: sanitizeActiveCells(nextCells, loader.pattern.grid)
-          }
-        };
-      });
-
-      saveProject(project);
-      return { project };
-    }),
-  setCellActive: (cellIndex, active) =>
-    set((state) => {
-      const project = updateSelectedLoader(state.project, state.selectedLoaderId, (loader) => {
-        const hasCell = loader.pattern.activeCells.includes(cellIndex);
-        if (hasCell === active) {
-          return loader;
-        }
-
-        const nextCells = active
-          ? [...loader.pattern.activeCells, cellIndex].sort((left, right) => left - right)
-          : loader.pattern.activeCells.filter((value) => value !== cellIndex);
-
-        return {
-          ...loader,
-          pattern: {
-            ...loader.pattern,
-            activeCells: sanitizeActiveCells(nextCells, loader.pattern.grid)
-          }
-        };
-      });
-
-      saveProject(project);
-      return { project };
-    }),
-  toggleCellForLoader: (loaderId, cellIndex) =>
-    set((state) => {
-      const project = updateLoaderById(state.project, loaderId, (loader) => {
-        const hasCell = loader.pattern.activeCells.includes(cellIndex);
-        const nextCells = hasCell
-          ? loader.pattern.activeCells.filter((value) => value !== cellIndex)
-          : [...loader.pattern.activeCells, cellIndex].sort((left, right) => left - right);
-
-        return {
-          ...loader,
-          pattern: {
-            ...loader.pattern,
-            activeCells: sanitizeActiveCells(nextCells, loader.pattern.grid)
-          }
-        };
-      });
-
-      saveProject(project);
-      return { project };
-    }),
-  setCellActiveForLoader: (loaderId, cellIndex, active) =>
-    set((state) => {
-      const project = updateLoaderById(state.project, loaderId, (loader) => {
-        const hasCell = loader.pattern.activeCells.includes(cellIndex);
-        if (hasCell === active) {
-          return loader;
-        }
-
-        const nextCells = active
-          ? [...loader.pattern.activeCells, cellIndex].sort((left, right) => left - right)
-          : loader.pattern.activeCells.filter((value) => value !== cellIndex);
-
-        return {
-          ...loader,
-          pattern: {
-            ...loader.pattern,
-            activeCells: sanitizeActiveCells(nextCells, loader.pattern.grid)
-          }
-        };
-      });
-
-      saveProject(project);
-      return { project };
-    }),
   setCellsActiveForLoader: (loaderId, cells, active, color) =>
-    set((state) => {
-      const project = updateLoaderById(state.project, loaderId, (loader) => {
-        const current = new Set(loader.pattern.activeCells);
-        const colors: Record<string, string> = { ...(loader.pattern.cellColors ?? {}) };
-        // Painting with the active colour stores no override, so changing the active colour still recolours it.
-        const paint = color && color.toUpperCase() !== loader.style.primaryColor.toUpperCase() ? color.toUpperCase() : undefined;
-        let changed = false;
-        for (const cellIndex of cells) {
-          if (!active) {
-            changed = current.delete(cellIndex) || changed;
-            delete colors[cellIndex];
-            continue;
-          }
-          if (!current.has(cellIndex)) {
-            current.add(cellIndex);
-            changed = true;
-          }
-          if (color !== undefined && colors[cellIndex] !== paint) {
-            if (paint) colors[cellIndex] = paint;
-            else delete colors[cellIndex];
-            changed = true;
-          }
-        }
-        if (!changed) {
-          return loader;
-        }
-        // One store update and one save per stroke/shape, not one per cell.
-        return {
-          ...loader,
-          pattern: {
-            ...loader.pattern,
-            activeCells: sanitizeActiveCells([...current], loader.pattern.grid),
-            cellColors: colors
-          }
-        };
-      });
-
-      saveProject(project);
-      return { project };
-    }),
-  transformLoaderCells: (loaderId, op) =>
-    set((state) => {
-      const project = updateLoaderById(state.project, loaderId, (loader) => {
-        const { rows, cols } = loader.pattern.grid;
-        const { activeCells, cellColors } = transformPattern(loader.pattern.activeCells, loader.pattern.cellColors, rows, cols, op);
-        return { ...loader, pattern: { ...loader.pattern, activeCells, cellColors } };
-      });
-
-      saveProject(project);
-      return { project };
-    }),
+    editLoader(loaderId, (loader) => layerOps.paintCells(loader, cells, active, color)),
+  transformLoaderCells: (loaderId, op) => editLoader(loaderId, (loader) => layerOps.transformActiveLayer(loader, op)),
   importSequence: (baseLoaderId, frames, fps) => {
     const state = get();
     const base = state.project.loaders.find((loader) => loader.id === baseLoaderId) ?? state.project.loaders[0];
@@ -812,20 +699,21 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const grid = cloneGrid(base.pattern.grid);
     const created = frames.map((frame, index) => {
       const blank = createBlankCustomLoader(state.project.loaders.length + index, base, "sequence", sequenceId);
-      return {
+      const framed = {
         ...blank,
         name: `GIF ${index + 1}`,
         sequenceIndex: index,
         artboard: { x: origin.x + index * (ARTBOARD_SIZE + SEQUENCE_FRAME_GAP), y: origin.y, width: ARTBOARD_SIZE, height: ARTBOARD_SIZE },
-        pattern: { ...blank.pattern, grid: cloneGrid(grid), activeCells: sanitizeActiveCells(frame.cells, grid), cellColors: frame.colors },
+        pattern: { ...blank.pattern, grid: cloneGrid(grid) },
         animation: { ...blank.animation, fps: clamp(Math.round(fps), 1, 30) }
       };
+      return normalizeLoader(layerOps.replaceDrawing(framed, sanitizeActiveCells(frame.cells, grid), frame.colors), state.project.loaders.length + index);
     });
-    const loaders = reindexSequenceLoaders([...state.project.loaders, ...created.map((loader, index) => normalizeLoader(loader, state.project.loaders.length + index))]);
+    const loaders = reindexSequenceLoaders([...state.project.loaders, ...created]);
     const project = { ...state.project, updatedAt: new Date().toISOString(), loaders };
     saveProject(project);
     set({ project, selectedLoaderId: created[0].id });
-    return created.map((loader) => loader.id);
+    return created.map((loader) => ({ loaderId: loader.id, layerId: loader.pattern.activeLayerId ?? "" }));
   },
   importCellsForLoaders: (entries) =>
     set((state) => {
@@ -836,30 +724,50 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         loaders: state.project.loaders.map((loader, index) => {
           const entry = byId.get(loader.id);
           if (!entry) return loader;
-          return normalizeLoader({
-            ...loader,
-            pattern: { ...loader.pattern, activeCells: sanitizeActiveCells(entry.cells, loader.pattern.grid), cellColors: entry.colors }
-          }, index);
+          const cells = sanitizeActiveCells(entry.cells, loader.pattern.grid);
+          return normalizeLoader(layerOps.putCellsOnLayer(loader, cells, entry.colors, { layerId: entry.layerId, name: "" }).loader, index);
         })
       };
 
       saveProject(project);
       return { project };
     }),
-  importCellsForLoader: (loaderId, cells, colors) =>
-    set((state) => {
-      const project = updateLoaderById(state.project, loaderId, (loader) => ({
-        ...loader,
-        pattern: {
-          ...loader.pattern,
-          activeCells: sanitizeActiveCells(cells, loader.pattern.grid),
-          cellColors: colors
-        }
-      }));
-
-      saveProject(project);
-      return { project };
-    }),
+  importCellsForLoader: (loaderId, cells, colors, target) => {
+    let layerId = "";
+    editLoader(loaderId, (loader) => {
+      const result = layerOps.putCellsOnLayer(loader, sanitizeActiveCells(cells, loader.pattern.grid), colors, target);
+      layerId = result.layerId;
+      return result.loader;
+    });
+    return layerId;
+  },
+  addLayer: (loaderId, name) => editLoader(loaderId, (loader) => layerOps.addEmptyLayer(loader, name)),
+  duplicateLayer: (loaderId, layerId, name) => editLoader(loaderId, (loader) => layerOps.duplicateLayer(loader, layerId, name)),
+  deleteLayer: (loaderId, layerId) => editLoader(loaderId, (loader) => layerOps.deleteLayer(loader, layerId)),
+  selectLayer: (loaderId, layerId) => editLoader(loaderId, (loader) => layerOps.selectLayer(loader, layerId)),
+  setLayerVisible: (loaderId, layerId, visible) => editLoader(loaderId, (loader) => layerOps.setLayerVisible(loader, layerId, visible)),
+  renameLayer: (loaderId, layerId, name) => editLoader(loaderId, (loader) => layerOps.renameLayer(loader, layerId, name)),
+  reorderLayer: (loaderId, layerId, direction) => editLoader(loaderId, (loader) => layerOps.reorderLayer(loader, layerId, direction)),
+  mergeLayerDown: (loaderId, layerId) => editLoader(loaderId, (loader) => layerOps.mergeLayerDown(loader, layerId)),
+  moveLayerBy: (loaderId, layerId, dx, dy) => editLoader(loaderId, (loader) => layerOps.moveLayerBy(loader, layerId, dx, dy)),
+  addLayerFromPixels: (loaderId, name, pixels) => {
+    let layerId: string | null = null;
+    editLoader(loaderId, (loader) => {
+      const result = layerOps.addLayerWithPixels(loader, name, pixels);
+      layerId = result.layerId;
+      return result.loader;
+    });
+    return layerId;
+  },
+  liftToLayer: (loaderId, cells, name) => {
+    let layerId: string | null = null;
+    editLoader(loaderId, (loader) => {
+      const result = layerOps.liftToLayer(loader, cells, name);
+      layerId = result.layerId;
+      return result.loader;
+    });
+    return layerId;
+  },
   setPatternSourceType: () => undefined,
   addLoader: (kind = "custom") =>
     set((state) => {
@@ -1096,7 +1004,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     }),
   setAnimationMode: () => undefined,
   fillGrid: (filled) => set((state) => {
-    const project = updateSelectedLoader(state.project, state.selectedLoaderId, loader => ({...loader, pattern: {...loader.pattern, activeCells: filled ? Array.from({length: loader.pattern.grid.rows * loader.pattern.grid.cols}, (_, i) => i) : [], cellColors: undefined}}));
+    const project = updateSelectedLoader(state.project, state.selectedLoaderId, (loader) => layerOps.fillActiveLayer(loader, filled));
     saveProject(project); return {project};
   }),
   setMotionPreset: (presetId) =>
@@ -1386,15 +1294,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   applyLoaderTemplate: () => undefined,
   applyPatternPreset: (presetId) =>
     set((state) => {
-      const project = updateSelectedLoader(state.project, state.selectedLoaderId, (loader) => ({
-        ...loader,
-        pattern: {
-          ...loader.pattern,
-          activeCells: buildPatternCells(presetId, loader.pattern.grid.rows, loader.pattern.grid.cols),
-          // A new pattern replaces the drawing, including its colours.
-          cellColors: undefined
-        }
-      }));
+      // A new pattern replaces the drawing (all layers), including its colours.
+      const project = updateSelectedLoader(state.project, state.selectedLoaderId, (loader) =>
+        layerOps.replaceDrawing(loader, buildPatternCells(presetId, loader.pattern.grid.rows, loader.pattern.grid.cols))
+      );
 
       saveProject(project);
       return { project };
@@ -1406,29 +1309,17 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         return {};
       }
 
-      const nextGrid = sanitizeGrid({
-        ...DEFAULT_DRAWN_GRID,
-        rows: savedPattern.rows ?? DEFAULT_DRAWN_GRID.rows,
-        cols: savedPattern.cols ?? DEFAULT_DRAWN_GRID.cols
+      const savedCols = savedPattern.cols ?? DEFAULT_DRAWN_GRID.cols;
+      const savedRows = savedPattern.rows ?? DEFAULT_DRAWN_GRID.rows;
+      const pixels = Object.fromEntries(savedPattern.activeCells.map((cell) => [`${cell % savedCols},${Math.floor(cell / savedCols)}`, savedPattern.cellColors?.[cell] ?? ""]));
+      const project = updateSelectedLoader(state.project, state.selectedLoaderId, (loader) => {
+        const { rows, cols } = loader.pattern.grid;
+        const { layers } = layerOps.layersOf(loader);
+        if (layers.length >= layerOps.MAX_LAYERS) return loader;
+        // Loaded as its own layer, centred: nothing already drawn is replaced, and it can be moved.
+        const layer = { ...createLayer(savedPattern.name ?? "", pixels), offsetX: Math.floor((cols - savedCols) / 2), offsetY: Math.floor((rows - savedRows) / 2) };
+        return layerOps.withLayers(loader, [...layers, layer], layer.id);
       });
-      const project = updateSelectedLoader(state.project, state.selectedLoaderId, (loader) => ({
-        ...loader,
-        pattern: {
-          ...loader.pattern,
-          grid: nextGrid,
-          activeCells: sanitizeActiveCells(savedPattern.activeCells, nextGrid),
-          cellColors: savedPattern.cellColors ? { ...savedPattern.cellColors } : undefined
-        },
-        animation: normalizeAnimation(
-          {
-            ...loader.animation,
-            originX: clamp(loader.animation.originX, 1, nextGrid.cols),
-            originY: clamp(loader.animation.originY, 1, nextGrid.rows)
-          },
-          nextGrid,
-          loader.animation.presetId
-        )
-      }));
 
       saveProject(project);
       return { project };
@@ -1540,7 +1431,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       saveProject(project);
       return { project };
     })
-}));
+};
+});
 
 export function useSelectedLoader() {
   return useEditorStore((state) =>

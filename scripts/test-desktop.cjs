@@ -58,11 +58,17 @@ async function main() {
   fs.writeFileSync(path.join(staticDir, 'editor', 'index.html'), '<h1>editor</h1>');
   fs.writeFileSync(path.join(staticDir, 'app.js'), 'console.log(1)');
   const scenes = [];
+  const editorRequests = [];
   const server = createApiServer({
     token: 'secret-token',
     staticDir,
     onScene: (scene, source) => scenes.push({...scene, source}),
-    getState: () => ({connected: true, deviceName: 'IDM-0384DA', live: 'agent'})
+    getState: () => ({connected: true, deviceName: 'IDM-0384DA', live: 'agent'}),
+    onEditor: async (req) => {
+      editorRequests.push(req);
+      if (req.action === 'draw' && req.payload.name === 'fail') throw new Error('editor busy');
+      return {ok: req.action};
+    }
   });
   await new Promise(r => server.listen(0, '127.0.0.1', r));
   const port = server.address().port;
@@ -90,6 +96,38 @@ async function main() {
   assert.equal(scenes.length, 1, 'rejected requests never reach the panel');
   const preflight = await request(port, {method: 'OPTIONS', path: '/api/scene', headers: {origin: 'https://evil.example', 'access-control-request-method': 'POST'}});
   assert(!preflight.headers['access-control-allow-origin'], 'no CORS grant for web pages');
+
+  // Editor routes: validated before they reach the editor window; editor failures become 503.
+  assert.equal((await request(port, {path: '/api/editor/drawing'})).status, 401, 'editor routes need the token too');
+  const drawing = await request(port, {path: '/api/editor/drawing', headers: auth});
+  assert.equal(drawing.status, 200);
+  assert.deepEqual(JSON.parse(drawing.text).data, {ok: 'get-drawing'});
+  const drawn = await request(port, {method: 'POST', path: '/api/editor/draw', headers: auth, body: {frames: [['rr']], palette: {r: '#FF0000'}}});
+  assert.equal(drawn.status, 200);
+  assert.deepEqual(editorRequests[1], {action: 'draw', payload: {frames: [['rr']], palette: {r: '#FF0000'}, target: 'layer', x: 0, y: 0}}, 'defaults filled in');
+  assert.equal((await request(port, {method: 'POST', path: '/api/editor/draw', headers: auth, body: {frames: [['x'.repeat(40)]], palette: {}}})).status, 400, 'oversized rows rejected');
+  assert.equal((await request(port, {method: 'POST', path: '/api/editor/draw', headers: auth, body: {frames: [], palette: {}}})).status, 400, 'no frames rejected');
+  assert.equal((await request(port, {method: 'POST', path: '/api/editor/draw', headers: auth, body: {frames: [['r']], palette: {rr: '#FF0000'}}})).status, 400, 'palette keys are one character');
+  assert.equal(editorRequests.length, 2, 'invalid artwork never reaches the editor');
+  const failed = await request(port, {method: 'POST', path: '/api/editor/draw', headers: auth, body: {frames: [['r']], palette: {r: '#FF0000'}, name: 'fail'}});
+  assert.equal(failed.status, 503);
+  assert.match(JSON.parse(failed.text).error, /editor busy/);
+  assert.equal((await request(port, {path: '/api/editor/nope', headers: auth})).status, 404);
+
+  // The IPC relay pairs answers with requests by id and times out silent editors.
+  const {createEditorRelay} = require('../desktop/src/editor-relay.ts');
+  const sent = [];
+  const relay = createEditorRelay(message => { sent.push(message); return true; }, 50);
+  const first = relay.request({action: 'get-drawing'});
+  const second = relay.request({action: 'get-drawing'});
+  relay.handleResponse({id: sent[1].id, ok: true, data: 'two'});
+  relay.handleResponse({id: sent[0].id, ok: false, error: 'nope'});
+  assert.equal(await second, 'two');
+  await assert.rejects(first, /nope/);
+  relay.handleResponse({id: 999, ok: true});
+  await assert.rejects(relay.request({action: 'get-drawing'}), /did not answer/);
+  const closed = createEditorRelay(() => false);
+  await assert.rejects(closed.request({action: 'get-drawing'}), /still starting/);
 
   const editor = await request(port, {path: '/editor/', headers: {host: `127.0.0.1:${port}`}});
   assert.equal(editor.status, 200);

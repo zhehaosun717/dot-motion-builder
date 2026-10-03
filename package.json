@@ -15,7 +15,7 @@
     "test": "pnpm run typecheck && pnpm run test:motion && pnpm run test:exports && pnpm run test:idotmatrix && pnpm run test:agent",
     "test:idotmatrix": "node scripts/test-idotmatrix.cjs && node scripts/test-idotmatrix-live.cjs",
     "start:fast": "next build && next start --port 4321",
-    "test:agent": "node scripts/test-agent-display.cjs && node scripts/test-desktop.cjs && node scripts/test-mcp.cjs && node scripts/test-editor-tools.cjs",
+    "test:agent": "node scripts/test-agent-display.cjs && node scripts/test-desktop.cjs && node scripts/test-mcp.cjs && node scripts/test-editor-tools.cjs && node scripts/test-layers.cjs",
     "desktop:build": "node scripts/build-desktop.mjs",
     "desktop:start": "node scripts/build-desktop.mjs && electron .",
     "desktop:dist": "node scripts/build-desktop.mjs && electron-builder --win"

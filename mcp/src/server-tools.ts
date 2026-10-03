@@ -69,6 +69,41 @@ export function createMatrixMcpServer(client: PanelClient) {
     }
   }, async ({ frames, palette, fps }) => report(await client.sendScene({ kind: "pixels", frames, palette, fps }), "your pixel art"));
 
+  server.registerTool("editor_get_drawing", {
+    title: "Read the editor drawing",
+    description:
+      "Read the artwork open in the Dot Matrix Studio editor (the selected artboard): its grid size, the flattened " +
+      "picture as rows of palette keys ('.' = unlit) and its layer list. Use it to see what the user drew before " +
+      "adding to it with editor_draw.",
+    inputSchema: {}
+  }, async () => {
+    const result = await client.getEditorDrawing();
+    return result.ok ? text(JSON.stringify(result.state)) : text(result.error, true);
+  });
+
+  server.registerTool("editor_draw", {
+    title: "Draw in the editor",
+    description:
+      "Create pixel art inside the Dot Matrix Studio editor so the user can keep editing it (unlike draw_pixels, which " +
+      "only shows it on the panel). One frame becomes a new layer on the selected artboard (target 'layer', default) " +
+      "or a new artboard (target 'artboard'); several frames become a new frame sequence (an animation, up to 24). " +
+      "Each frame is up to 32 rows of up to 32 palette keys; '.' is unlit. The grid is usually 32x32: call " +
+      "editor_get_drawing first to check its size and what is already there. x/y shift the art on the grid. Bright, " +
+      "saturated colours read best on LEDs; the user can undo with Ctrl+Z.",
+    inputSchema: {
+      frames: z.array(z.array(z.string().max(32)).max(32)).min(1).max(24).describe("Frames; each frame is a list of rows"),
+      palette: z.record(z.string(), z.string()).describe("Map of single-character keys to hex colours, e.g. {\"r\": \"#FF0000\"}"),
+      target: z.enum(["layer", "artboard"]).optional().describe("Where a single frame goes (default: a new layer)"),
+      name: z.string().max(40).optional().describe("Layer or artboard name, e.g. 'cat'"),
+      x: z.number().int().min(-32).max(32).optional().describe("Column offset on the grid"),
+      y: z.number().int().min(-32).max(32).optional().describe("Row offset on the grid"),
+      fps: z.number().min(1).max(20).optional().describe("Playback speed for several frames (default 6)")
+    }
+  }, async (args) => {
+    const result = await client.drawInEditor(args);
+    return result.ok ? text(`Drew it in the editor: ${JSON.stringify(result.state)}`) : text(result.error, true);
+  });
+
   server.registerTool("get_panel_state", {
     title: "Read panel state",
     description: "Check whether the LED panel is connected and what it is currently showing.",

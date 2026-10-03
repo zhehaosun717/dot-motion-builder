@@ -3,6 +3,7 @@ import http from "node:http";
 import path from "node:path";
 import { timingSafeEqual } from "node:crypto";
 import { AgentScene, parseScene } from "@/lib/agent-display/scene";
+import { editorDrawSchema, EditorDrawRequest } from "@/lib/agent-editor";
 import { SCENE_SOURCES, SceneSource } from "./scene-priority";
 
 export const MAX_BODY_BYTES = 64 * 1024;
@@ -27,7 +28,11 @@ export type ApiServerOptions = {
   /** Returns false when the scene was valid but not shown (e.g. a hook during an agent's hold). */
   onScene: (scene: AgentScene, source: SceneSource) => boolean | void;
   getState: () => unknown;
+  /** Asks the editor window to read or draw artwork; rejects when the editor cannot answer. */
+  onEditor?: (request: EditorRequest) => Promise<unknown>;
 };
+
+export type EditorRequest = { action: "get-drawing" } | { action: "draw"; payload: EditorDrawRequest };
 
 type Envelope = { success: boolean; data: unknown; error: string | null };
 
@@ -69,8 +74,45 @@ function readBody(req: http.IncomingMessage): Promise<string> {
   });
 }
 
+async function readJson(req: http.IncomingMessage): Promise<{ ok: true; json: unknown } | { ok: false; status: number; error: string }> {
+  let raw: string;
+  try {
+    raw = await readBody(req);
+  } catch (error) {
+    return { ok: false, status: (error as { status?: number }).status ?? 400, error: "could not read request body" };
+  }
+  try {
+    return { ok: true, json: JSON.parse(raw) };
+  } catch {
+    return { ok: false, status: 400, error: "body must be JSON" };
+  }
+}
+
+/** Editor routes: GET /api/editor/drawing reads the selected artboard; POST /api/editor/draw adds artwork. */
+async function handleEditor(req: http.IncomingMessage, res: http.ServerResponse, url: URL, options: ApiServerOptions) {
+  if (!options.onEditor) return fail(res, 404, "unknown endpoint");
+  let request: EditorRequest;
+  if (req.method === "GET" && url.pathname === "/api/editor/drawing") {
+    request = { action: "get-drawing" };
+  } else if (req.method === "POST" && url.pathname === "/api/editor/draw") {
+    const body = await readJson(req);
+    if (!body.ok) return fail(res, body.status, body.error);
+    const parsed = editorDrawSchema.safeParse(body.json);
+    if (!parsed.success) return fail(res, 400, parsed.error.issues.map((issue) => `${issue.path.join(".") || "body"}: ${issue.message}`).join("; "));
+    request = { action: "draw", payload: parsed.data };
+  } else {
+    return fail(res, 404, "unknown endpoint");
+  }
+  try {
+    return send(res, 200, { success: true, data: await options.onEditor(request), error: null });
+  } catch (error) {
+    return fail(res, 503, error instanceof Error ? error.message : "the editor did not answer");
+  }
+}
+
 async function handleApi(req: http.IncomingMessage, res: http.ServerResponse, url: URL, options: ApiServerOptions) {
   if (!hasToken(req, options.token)) return fail(res, 401, "missing or invalid token");
+  if (url.pathname.startsWith("/api/editor/")) return handleEditor(req, res, url, options);
   if (req.method === "GET" && url.pathname === "/api/state") return send(res, 200, { success: true, data: options.getState(), error: null });
   if (req.method === "POST" && url.pathname === "/api/scene") {
     const source = (url.searchParams.get("source") ?? "agent") as SceneSource;

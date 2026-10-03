@@ -7,6 +7,7 @@ import type { AgentScene } from "@/lib/agent-display/scene";
 import type { DesktopPanelState } from "@/lib/desktop-bridge";
 import { writeApiInfo } from "./api-info";
 import { createApiServer } from "./api-server";
+import { createEditorRelay, EditorResponse } from "./editor-relay";
 import { faceIconBitmap } from "./app-icon";
 import { pickPanel } from "./device-chooser";
 import { acceptScene, SceneSource } from "./scene-priority";
@@ -60,6 +61,13 @@ function sendScene(scene: AgentScene, source: SceneSource = "agent") {
   return true;
 }
 
+/** Agents' editor requests (read or draw artwork) go to the editor window and wait for its answer. */
+const editorRelay = createEditorRelay((message) => {
+  if (!window || !rendererReady) return false;
+  window.webContents.send("matrix:editor-request", message);
+  return true;
+});
+
 /** Web Bluetooth needs a user gesture; executeJavaScript(…, true) supplies one so the panel connects by itself. */
 function autoConnect() {
   void window?.webContents.executeJavaScript("window.__matrixAutoConnect && window.__matrixAutoConnect()", true);
@@ -86,7 +94,7 @@ function listen(srv: Server, port: number) {
 
 async function startServer() {
   const token = crypto.randomBytes(24).toString("hex");
-  const create = () => createApiServer({ token, staticDir: staticDir(), onScene: sendScene, getState: () => panelState });
+  const create = () => createApiServer({ token, staticDir: staticDir(), onScene: sendScene, getState: () => panelState, onEditor: editorRelay.request });
   server = create();
   let port: number;
   try {
@@ -255,6 +263,7 @@ ipcMain.on("matrix:state", (_event, state: DesktopPanelState) => {
   refreshTray();
 });
 ipcMain.on("matrix:request-connect", scheduleReconnect);
+ipcMain.on("matrix:editor-response", (_event, response: EditorResponse) => editorRelay.handleResponse(response));
 
 app.on("second-instance", showWindow);
 app.on("before-quit", () => {

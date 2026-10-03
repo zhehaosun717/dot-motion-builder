@@ -49,7 +49,9 @@ const copy = {
   }
 } as const;
 
-type LastImport = { file: File; targets: string[] };
+/** Where the last import landed: one layer per artboard (one for a picture, one per GIF frame). */
+type ImportTarget = { loaderId: string; layerId: string };
+type LastImport = { file: File; targets: ImportTarget[] };
 type RasterCache = { file: File; rows: number; cols: number; fit: ImportFit; raster: ImportedRaster };
 
 type ImageImportControlsProps = {
@@ -84,17 +86,17 @@ export function ImageImportControls({ language, loader }: ImageImportControlsPro
     return raster;
   }
 
-  /** First import (no previous targets) creates or fills artboards; later runs re-apply onto the same ones. */
-  async function run(file: File, previous: string[] | null) {
+  /** First import adds a layer (or a frame sequence); later runs re-apply onto the same layers. */
+  async function run(file: File, previous: ImportTarget[] | null) {
     const request = ++requestRef.current;
     const loaders = useEditorStore.getState().project.loaders;
-    const targets = previous?.filter((id) => loaders.some((item) => item.id === id)) ?? [];
+    const targets = previous?.filter(({ loaderId, layerId }) => loaders.some((item) => item.id === loaderId && item.pattern.layers?.some((layer) => layer.id === layerId))) ?? [];
     if (previous && targets.length !== previous.length) {
       // Some imported artboards were deleted or undone: never re-apply onto whatever is selected now.
       setLastImport(null);
       return;
     }
-    const gridSource = loaders.find((item) => item.id === targets[0]) ?? loader;
+    const gridSource = loaders.find((item) => item.id === targets[0]?.loaderId) ?? loader;
     const { rows, cols } = gridSource.pattern.grid;
     setStatus("busy");
     try {
@@ -109,16 +111,17 @@ export function ImageImportControls({ language, loader }: ImageImportControlsPro
       const nextOptions = optionsRef.current;
       const frames = raster.frames.map((frame) => pixelsToCells(frame, rows, cols, nextOptions));
       if (previous && targets.length === frames.length) {
-        importCellsForLoaders(targets.map((loaderId, index) => ({ loaderId, ...frames[index] })));
+        importCellsForLoaders(targets.map((target, index) => ({ ...target, ...frames[index] })));
       } else if (previous) {
         setLastImport(null);
       } else if (frames.length > 1) {
         setLastImport({ file, targets: importSequence(gridSource.id, frames, raster.fps) });
       } else {
-        importCellsForLoader(gridSource.id, frames[0].cells, frames[0].colors);
+        // A picture lands on its own new layer, so it never replaces what is already drawn.
+        const layerId = importCellsForLoader(gridSource.id, frames[0].cells, frames[0].colors, { name: file.name.replace(/\.[^.]+$/, "") });
         // Show the picture as is; only if that artboard is still the one selected after decoding.
         if (useEditorStore.getState().selectedLoaderId === gridSource.id) setMotionPreset("static");
-        setLastImport({ file, targets: [gridSource.id] });
+        setLastImport({ file, targets: [{ loaderId: gridSource.id, layerId }] });
       }
       setStatus("idle");
     } catch (error) {

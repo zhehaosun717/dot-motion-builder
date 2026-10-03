@@ -18,7 +18,7 @@ const copy = {
     placeholder: "输入文字，回车换行",
     font: "字体", large: "10px 中文", small: "3×5 小字（英文数字）", scale: "字号（放大倍数）",
     stamp: "写到画布",
-    hint: "用画笔颜色写在画面中间，可以再用方向键挪位置",
+    hint: "用画笔颜色写在画面中间，单独成一个图层，可以用方向键挪位置",
     failed: "文字渲染失败"
   },
   en: {
@@ -26,7 +26,7 @@ const copy = {
     placeholder: "Type text; Enter for a new line",
     font: "Font", large: "10px (Chinese)", small: "3×5 small (Latin, digits)", scale: "Size (enlargement)",
     stamp: "Write on Canvas",
-    hint: "Written in the brush colour, centred; nudge it with the arrow keys",
+    hint: "Written in the brush colour, centred, on its own layer; nudge it with the arrow keys",
     failed: "Could not render the text"
   }
 } as const;
@@ -45,7 +45,7 @@ export function TextStampControls({ language, loader }: TextStampControlsProps) 
   const maxScale = MAX_TEXT_SCALE[font];
   const effectiveScale = Math.min(scale, maxScale);
   const [failed, setFailed] = useState(false);
-  const setCellsActiveForLoader = useEditorStore((state) => state.setCellsActiveForLoader);
+  const importCellsForLoader = useEditorStore((state) => state.importCellsForLoader);
   const brushChoice = useDrawStore((state) => state.brushChoice);
   const rememberColor = useDrawStore((state) => state.rememberColor);
 
@@ -57,7 +57,9 @@ export function TextStampControls({ language, loader }: TextStampControlsProps) 
       const cells = textToCells(text, rows, cols, font, effectiveScale);
       const color = brushChoice ?? loader.style.primaryColor;
       if (cells.length) {
-        setCellsActiveForLoader(loader.id, cells, true, color);
+        // Each text goes on its own layer named after it, so it can be moved or deleted on its own.
+        const colors = Object.fromEntries(cells.map((cell) => [cell, color]));
+        importCellsForLoader(loader.id, cells, colors, { name: text.trim().replace(/\s+/g, " ").slice(0, 20) });
         rememberColor(color);
       }
       setFailed(false);

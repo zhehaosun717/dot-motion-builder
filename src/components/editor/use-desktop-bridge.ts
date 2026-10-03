@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { handleEditorRequest } from "@/components/editor/agent-editor-handler";
 import { parseScene } from "@/lib/agent-display/scene";
 import { getDesktopBridge } from "@/lib/desktop-bridge";
 import { useMatrixStore } from "@/stores/use-matrix-store";
@@ -48,10 +49,13 @@ export function useDesktopBridge() {
       const attemptFailed = previous.status.kind === "connecting" && !state.link;
       if ((linkLost || attemptFailed) && state.lastDisconnect !== "manual") bridge.requestReconnect();
     });
+    // Agents can read and draw in the editor through the MCP server.
+    const offEditor = bridge.onEditorRequest?.(handleEditorRequest);
     bridge.ready();
 
     return () => {
       offScene();
+      offEditor?.();
       unsubscribe();
       delete target.__matrixAutoConnect;
     };

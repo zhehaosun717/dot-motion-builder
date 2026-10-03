@@ -22,7 +22,8 @@ async function startFakeApp(dataDir, token = 'tok') {
     token,
     staticDir: dataDir,
     onScene: (scene, source) => { received.push({scene, source}); return !(source === 'hook' && scene.status === 'working'); },
-    getState: () => ({connected: true, deviceName: 'IDM-TEST', live: 'agent'})
+    getState: () => ({connected: true, deviceName: 'IDM-TEST', live: 'agent'}),
+    onEditor: async (req) => { received.push({editor: req}); return req.action === 'get-drawing' ? {rows: 32, cols: 32, pixels: ['....']} : {created: 'layer'}; }
   });
   await new Promise(r => server.listen(0, '127.0.0.1', r));
   writeApiInfo(dataDir, {port: server.address().port, token, executable: path.join(dataDir, 'missing.exe'), pid: 1});
@@ -72,7 +73,7 @@ async function main() {
   await Promise.all([mcp.connect(serverTransport), mcpClient.connect(clientTransport)]);
 
   const tools = (await mcpClient.listTools()).tools.map(t => t.name).sort();
-  assert.deepEqual(tools, ['draw_pixels', 'get_panel_state', 'set_mood', 'set_status', 'show_text']);
+  assert.deepEqual(tools, ['draw_pixels', 'editor_draw', 'editor_get_drawing', 'get_panel_state', 'set_mood', 'set_status', 'show_text']);
   const moodTool = (await mcpClient.listTools()).tools.find(t => t.name === 'set_mood');
   assert.deepEqual(moodTool.inputSchema.properties.mood.enum.slice(0, 3), ['neutral', 'happy', 'excited'], 'mood enum is advertised');
 
@@ -83,6 +84,16 @@ async function main() {
   assert(!(await call('draw_pixels', {frames: [['rr', 'rr']], palette: {r: '#FF0000'}})).isError);
   assert.deepEqual(fake.received.map(r => r.scene.kind), ['status', 'mood', 'text', 'pixels']);
   assert(fake.received.every(r => r.source === 'agent'));
+  const read = await call('editor_get_drawing', {});
+  assert(!read.isError);
+  assert.match(read.content[0].text, /"cols":32/);
+  const drew = await call('editor_draw', {frames: [['rr', 'rr']], palette: {r: '#FF0000'}, name: 'cat', target: 'artboard'});
+  assert(!drew.isError);
+  assert.match(drew.content[0].text, /editor/);
+  const editorCalls = fake.received.splice(4).map(r => r.editor);
+  assert.deepEqual(editorCalls.map(r => r.action), ['get-drawing', 'draw']);
+  assert.equal(editorCalls[1].payload.target, 'artboard');
+  assert((await call('editor_draw', {frames: [['r'.repeat(33)]], palette: {r: '#FF0000'}})).isError, 'oversized art is an error result');
   const state = await call('get_panel_state', {});
   assert.match(state.content[0].text, /IDM-TEST/);
   const rejected = await call('draw_pixels', {frames: [['x'.repeat(40)]], palette: {}});
@@ -91,7 +102,7 @@ async function main() {
   fake.server.close();
 
   for (const dir of [dataDir, launchDir, mcpDir]) fs.rmSync(dir, {recursive: true, force: true});
-  console.log('PASS: mcp — client discovery/auth/errors/launch-on-demand, 5 tools end to end over MCP.');
+  console.log('PASS: mcp — client discovery/auth/errors/launch-on-demand, 7 tools end to end over MCP.');
 }
 
 main().catch(error => { console.error(error); process.exit(1); });

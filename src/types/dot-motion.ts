@@ -99,6 +99,13 @@ export type PatternConfig = {
   activeCells: number[];
   /** Per-cell colour overrides (#RRGGBB) for lit cells; cells without one use the active colour. */
   cellColors?: Record<string, string>;
+  /**
+   * Drawing layers, bottom first. When present they are the source of truth and activeCells/cellColors
+   * are their flattened result; projects from before layers have none until the first edit.
+   */
+  layers?: PatternLayer[];
+  /** The layer drawing tools act on. */
+  activeLayerId?: string;
   snapshots: PatternSnapshot[];
   sourceType: "drawn" | "template" | "generated";
   presetId?: PatternPresetId | "custom";
@@ -124,6 +131,17 @@ export type GridConfig = {
   gap: number;
   symmetryX?: boolean;
   symmetryY?: boolean;
+};
+
+export type PatternLayer = {
+  id: string;
+  name: string;
+  visible: boolean;
+  /** Where the layer's (0, 0) sits on the grid; moving a layer only changes this. */
+  offsetX: number;
+  offsetY: number;
+  /** Pixels by "x,y" in layer coordinates (may lie outside the grid): #RRGGBB, or "" for the base colour. */
+  pixels: Record<string, string>;
 };
 
 export type PatternSnapshot = {

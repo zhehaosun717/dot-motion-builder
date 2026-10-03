@@ -2635,3 +2635,124 @@ select {
   transform: translateX(-50%);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
 }
+
+/* Layers panel. */
+.layers-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.layers-panel__list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  max-height: 240px;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.layers-panel__row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+}
+
+.layers-panel__row.is-active {
+  border-color: var(--primary);
+  background: color-mix(in oklab, var(--primary) 14%, transparent);
+}
+
+.layers-panel__row.is-hidden .layers-panel__name {
+  opacity: 0.45;
+}
+
+.layers-panel__eye {
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+
+.layers-panel__name,
+.layers-panel__rename {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  height: 28px;
+  padding: 0 8px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 0.82rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.layers-panel__rename {
+  border: 1px solid var(--app-border);
+  background: color-mix(in oklab, var(--input) 10%, transparent);
+  cursor: text;
+}
+
+.layers-panel__count {
+  color: var(--app-muted);
+  font-size: 0.72rem;
+}
+
+/* Selection box and symmetry guides on the canvas. */
+.dot-grid__cell.is-selected {
+  outline: 1px solid rgba(140, 190, 255, 0.85);
+  outline-offset: 0;
+}
+
+.dot-grid__cell.is-selected:not(.is-active) {
+  background: rgba(90, 140, 230, 0.35) !important;
+}
+
+.dot-grid--sym-x,
+.dot-grid--sym-y,
+.dot-grid--sym-xy {
+  position: relative;
+}
+
+.dot-grid--sym-x::before,
+.dot-grid--sym-xy::before,
+.dot-grid--sym-y::after,
+.dot-grid--sym-xy::after {
+  position: absolute;
+  z-index: 2;
+  background: rgba(255, 196, 90, 0.7);
+  content: "";
+  pointer-events: none;
+}
+
+.dot-grid--sym-x::before,
+.dot-grid--sym-xy::before {
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+}
+
+.dot-grid--sym-y::after,
+.dot-grid--sym-xy::after {
+  top: 50%;
+  right: 0;
+  left: 0;
+  height: 1px;
+}
+
+.dot-grid--tool-select .dot-grid__cell {
+  cursor: crosshair;
+}

@@ -15,6 +15,8 @@ export type MatrixDesktopBridge = {
   requestReconnect: () => void;
   /** Desktop app: native screen/window picker; resolves a desktop capture source id, or null if cancelled. */
   pickCaptureSource?: () => Promise<string | null>;
+  /** Desktop app: answers agents' editor requests (read the drawing, draw artwork); returns an unsubscribe. */
+  onEditorRequest?: (handler: (request: { action: string; payload?: unknown }) => unknown) => () => void;
 };
 
 export function getDesktopBridge(): MatrixDesktopBridge | null {

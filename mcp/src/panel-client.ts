@@ -60,6 +60,18 @@ export class PanelClient {
     return { ok: true, shown: data?.shown !== false };
   }
 
+  /** Reads the editor's selected artboard (palette rows plus layers). */
+  async getEditorDrawing(): Promise<StateResult> {
+    const result = await this.call("GET", "/api/editor/drawing");
+    return result.ok ? { ok: true, state: result.data } : result;
+  }
+
+  /** Draws artwork into the editor (new layer, artboard or frame sequence). */
+  async drawInEditor(artwork: unknown): Promise<StateResult> {
+    const result = await this.call("POST", "/api/editor/draw", artwork);
+    return result.ok ? { ok: true, state: result.data } : result;
+  }
+
   async getState(): Promise<StateResult> {
     const result = await this.call("GET", "/api/state");
     return result.ok ? { ok: true, state: result.data } : result;

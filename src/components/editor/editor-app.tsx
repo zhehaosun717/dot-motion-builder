@@ -15,6 +15,8 @@ import { GridTransform } from "@/lib/grid-transforms";
 import { DRAW_TOOL_KEYS, DrawingTools } from "@/components/editor/drawing-tools";
 import { ImageImportControls } from "@/components/editor/image-import-controls";
 import { PatternLibrarySection } from "@/components/editor/pattern-library-section";
+import { LayersPanel } from "@/components/editor/layers-panel";
+import { activePixelSelection, copySelection, cutSelection, deleteSelection, nudgeDrawing, pasteSelection } from "@/components/editor/selection-actions";
 import { SaveStatusBanner } from "@/components/editor/save-status-banner";
 import { TextStampControls } from "@/components/editor/text-stamp-controls";
 import { redo, undo, useEditorHistory } from "@/stores/editor-history";
@@ -291,7 +293,6 @@ export function EditorApp() {
   const clearSelection = useEditorStore((state) => state.clearSelection);
   const setCellsActiveForLoader = useEditorStore((state) => state.setCellsActiveForLoader);
   // null = paint with the active colour (no per-cell override), so the Active Color control keeps recolouring it.
-  const transformLoaderCells = useEditorStore((state) => state.transformLoaderCells);
   const addLoader = useEditorStore((state) => state.addLoader);
   const addSequenceFrame = useEditorStore((state) => state.addSequenceFrame);
   const removeSequenceFrame = useEditorStore((state) => state.removeSequenceFrame);
@@ -343,7 +344,9 @@ export function EditorApp() {
     colors: true,
     effects: true,
     panel: true,
-    library: true
+    library: true,
+    layers: false,
+    content: false
   });
   const zoomHudTimeoutRef = useRef<number | null>(null);
   const panStateRef = useRef<{
@@ -404,18 +407,31 @@ export function EditorApp() {
         const { selectedLoaderId: loaderId } = useEditorStore.getState();
         if (loaderId) {
           event.preventDefault();
-          transformLoaderCells(loaderId, nudge);
+          nudgeDrawing(loaderId, nudge);
         }
         return;
       }
-      if (modifier && event.key.toLowerCase() === "c") {
+      // With a selection box, copy / cut / paste / delete work on pixels; otherwise on whole artboards.
+      const pixelSelection = activePixelSelection();
+      if (modifier && key === "c") {
         event.preventDefault();
-        copySelectedLoader();
+        if (pixelSelection) {
+          copySelection();
+        } else {
+          copySelectedLoader();
+          useDrawStore.getState().setLastCopy("artboard");
+        }
         return;
       }
-      if (modifier && event.key.toLowerCase() === "v") {
+      if (modifier && key === "x" && pixelSelection) {
         event.preventDefault();
-        pasteLoader();
+        cutSelection();
+        return;
+      }
+      if (modifier && key === "v") {
+        event.preventDefault();
+        if (useDrawStore.getState().lastCopy === "pixels") pasteSelection(language === "cn" ? "粘贴" : "Pasted");
+        else pasteLoader();
         return;
       }
       if (modifier && event.key.toLowerCase() === "d") {
@@ -425,7 +441,12 @@ export function EditorApp() {
       }
       if (event.key === "Backspace" || event.key === "Delete") {
         event.preventDefault();
-        deleteSelectedLoader();
+        if (pixelSelection) deleteSelection();
+        else deleteSelectedLoader();
+        return;
+      }
+      if (event.key === "Escape" && pixelSelection) {
+        useDrawStore.getState().setSelection(null);
         return;
       }
       // Escape deselects (empty-canvas clicks no longer do); the export drawer handles its own Escape.
@@ -437,7 +458,7 @@ export function EditorApp() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [clearSelection, copySelectedLoader, deleteSelectedLoader, duplicateSelectedLoader, isExportOpen, pasteLoader, transformLoaderCells]);
+  }, [clearSelection, copySelectedLoader, deleteSelectedLoader, duplicateSelectedLoader, isExportOpen, language, pasteLoader]);
 
   const t = uiCopy[language];
   const canvasBounds = useMemo(() => {
@@ -978,8 +999,6 @@ export function EditorApp() {
                 >
                   <div className="toolcraft-control-stack">
                     <DrawingTools language={language} loader={editingLoader} />
-                    <TextStampControls language={language} loader={editingLoader} />
-                    <ImageImportControls language={language} loader={editingLoader} />
                     <SliderControl showFill variant="discrete" markerCount={11} name={t.gridSize} min={MIN_SLIDER_GRID_SIZE} max={MAX_GRID_SIZE} step={1} value={editingLoader.pattern.grid.rows} valueLabel={`${editingLoader.pattern.grid.rows}×${editingLoader.pattern.grid.cols}`} onValueChange={changeGridSize} />
                     <SelectControl
                       name={t.shape}
@@ -988,6 +1007,31 @@ export function EditorApp() {
                       onValueChange={(value) => setCellShape(value as CellShape)}
                     />
                     <SliderControl showFill name={t.gap} min={0} max={20} step={1} unit="px" value={editingLoader.pattern.grid.gap} onValueChange={changeGridGap} />
+                  </div>
+                </PanelSection>
+
+                <PanelSection
+                  title={language === "cn" ? "图层" : "Layers"}
+                  collapsible
+                  collapsed={collapsedSections.layers}
+                  collapseLabel={language === "cn" ? "收起图层" : "Collapse layers"}
+                  expandLabel={language === "cn" ? "展开图层" : "Expand layers"}
+                  onCollapsedChange={(value) => setCollapsedSections(current => ({ ...current, layers: value }))}
+                >
+                  <LayersPanel language={language} loader={editingLoader} />
+                </PanelSection>
+
+                <PanelSection
+                  title={language === "cn" ? "文字与图片" : "Text & Images"}
+                  collapsible
+                  collapsed={collapsedSections.content}
+                  collapseLabel={language === "cn" ? "收起文字与图片" : "Collapse text and images"}
+                  expandLabel={language === "cn" ? "展开文字与图片" : "Expand text and images"}
+                  onCollapsedChange={(value) => setCollapsedSections(current => ({ ...current, content: value }))}
+                >
+                  <div className="toolcraft-control-stack">
+                    <TextStampControls language={language} loader={editingLoader} />
+                    <ImageImportControls language={language} loader={editingLoader} />
                   </div>
                 </PanelSection>
 

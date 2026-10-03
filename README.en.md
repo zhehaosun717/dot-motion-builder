@@ -20,13 +20,16 @@ A Windows desktop app for the **iDotMatrix 32×32 Bluetooth LED panel**. No vend
 ### Pixel animation editor
 
 - Grids from 3×3 to 32×32; at 32×32 one cell is one LED. Smaller grids scale up to fill the panel edge to edge, or with optional gaps for a dot-matrix look.
-- Drawing tools: **Brush (B)**, **Erase (E)**, **Bucket fill (G)**, **Eyedropper (I)**, and the shapes **Line (L)**, **Rectangle (R)** and **Circle (O)**; rectangles and circles are solid or outlined, and holding Shift while dragging draws the other kind. Fast strokes stay continuous.
+- Drawing tools: **Brush (B)**, **Erase (E)**, **Bucket fill (G)**, **Eyedropper (I)**, **Select (M)**, and the shapes **Line (L)**, **Rectangle (R)** and **Circle (O)**; rectangles and circles are solid or outlined, and holding Shift while dragging draws the other kind. Fast strokes stay continuous.
+- **Layers**: up to 16 per artboard; add, duplicate, delete, show/hide, reorder, merge down, double-click to rename. Brush, eraser, fill, moves and flips act on the selected layer; imported images, text and pasted pixels each get their own layer. A layer moved off the grid and back keeps every pixel.
+- **Selections**: drag a box with the Select tool; Ctrl+C / Ctrl+X / Ctrl+V copy, cut and paste (as a new layer), Delete clears, Esc deselects; drag inside the box or use the arrow keys to move its contents.
+- **Symmetry**: mirror left-right, top-bottom or both; strokes, shapes and fills are drawn on the mirrored side too, with a guide line on the canvas.
 - **Undo / redo**: Ctrl+Z and Ctrl+Y (or Ctrl+Shift+Z), up to 100 steps; a stroke, a fill or a slider drag is one step.
 - **Multi-colour pixel art**: every cell can have its own colour. Pick a brush colour; recently used colours appear as swatches; the eyedropper or Alt+click samples a cell. Bucket fill takes the connected area of one colour; raise **Fill tolerance** to take in similar shades of a photo, or turn off **Connected area only** to replace a colour everywhere.
-- **Move the drawing**: arrow keys or buttons shift it by one cell; flip it horizontally or vertically; rotate it 90° either way.
+- **Move the drawing**: arrow keys or buttons shift the selected layer by one cell; flip it horizontally or vertically; rotate it 90° either way.
 - **Text**: writes text in the built-in pixel fonts (10px with Chinese, or a 3×5 small font), centred, with line breaks and a size slider that enlarges them by whole steps (up to 3× for Chinese, 4× for the small font); nudge it into place with the arrow keys.
 - **Import images and animations**: scaled to the grid (one pixel per cell at 32×32), either whole or filling the grid with cropping; **Black cut** sets how dark a pixel may be and still stay off; optionally reduce to 32/16/8/4/2 colours with dithering. The options re-apply live to the last import. Animated GIF/WebP files become sequence frames (up to 24, at the original speed).
-- **Library**: save the current drawing (with its colours) and load it into any artboard later from a thumbnail.
+- **Library**: save the current drawing (with its colours) and load it into any artboard later, as a new layer, from a thumbnail.
 - 12 motion presets (wave, sweep, radar, breathing, heartbeat, …) and frame sequences; colour, opacity, shape and glow controls.
 - Grids above 13×13 render on a canvas, so 32×32 editing and preview stay smooth.
 
@@ -41,6 +44,10 @@ The app ships an MCP server that any MCP-capable agent can use:
 | `show_text` | A short message (Chinese supported) |
 | `draw_pixels` | 32×32 pixel art from a palette grid, optionally animated |
 | `get_panel_state` | Whether the panel is connected and what it shows |
+| `editor_get_drawing` | Reads the editor's selected artboard (palette grid) and its layers |
+| `editor_draw` | Draws pixel art into the editor as a new layer or artboard, or several frames as a sequence; you keep editing it, and Ctrl+Z undoes it |
+
+So you can ask your agent to "draw an orange cat in the editor" or "add a hat to this smiley": it reads the current picture and draws into it, with no extra API key.
 
 A hook CLI switches status automatically from agent lifecycle hooks (e.g. prompt submitted → thinking, needs approval → waiting, turn finished → done). A mood the agent chose is held for 12 s before hook updates may replace it.
 
@@ -98,7 +105,7 @@ pnpm desktop:dist     # Windows installer in release/
 pnpm test             # typecheck and all test suites
 ```
 
-Tests cover motion sampling, code export, GIF/PNG encoding and Bluetooth framing, live streaming (retries, late acks, mutual exclusion, cooldown), faces and Chinese text rendering, local API security checks, MCP tools end to end, and drawing-tool geometry.
+Tests cover motion sampling, code export, GIF/PNG encoding and Bluetooth framing, live streaming (retries, late acks, mutual exclusion, cooldown), faces and Chinese text rendering, local API security checks, MCP tools end to end, drawing-tool geometry, and layers and selections.
 
 ## Editor code export
 
