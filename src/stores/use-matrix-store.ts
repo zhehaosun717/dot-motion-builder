@@ -1,7 +1,7 @@
 "use client";
 
 import { create } from "zustand";
-import { AgentScene, isAnimated, renderScene } from "@/lib/agent-display/scene";
+import { AgentScene, isAnimated, renderScene, sameScene } from "@/lib/agent-display/scene";
 import { MATRIX_SIZE } from "@/lib/idotmatrix/constants";
 import { FrameSource, LiveFrameStream } from "@/lib/idotmatrix/live-stream";
 import { MatrixLink } from "@/lib/idotmatrix/matrix-link";
@@ -261,7 +261,8 @@ export const useMatrixStore = create<MatrixState>((set, get) => {
     },
 
     showAgentScene: (scene) => {
-      agentSince = Date.now();
+      // The same scene again (e.g. a tray tool re-syncing) keeps its clock, so its intro does not replay.
+      if (!sameScene(get().agentScene, scene)) agentSince = Date.now();
       set({ agentScene: scene });
       // Your own live sync or mirroring keeps the panel; the scene shows once you stop them.
       const live = get().live;

@@ -39,7 +39,7 @@ The app ships an MCP server that any MCP-capable agent can use:
 
 | Tool | What it shows |
 |---|---|
-| `set_status` | Work status icon: idle, thinking, working, waiting (needs you), done, error; optional short label (English or Chinese) |
+| `set_status` | Work status: idle, thinking, working, waiting (needs you), done, error; optional short label (English or Chinese), see below |
 | `set_mood` | Animated pixel face: neutral, happy, excited, love, proud, surprised, confused, sad, angry, sleepy, nervous |
 | `show_text` | A short message (Chinese supported) |
 | `draw_pixels` | 32×32 pixel art from a palette grid, optionally animated |
@@ -48,6 +48,8 @@ The app ships an MCP server that any MCP-capable agent can use:
 | `editor_draw` | Draws pixel art into the editor as a new layer or artboard, or several frames as a sequence; you keep editing it, and Ctrl+Z undoes it |
 
 So you can ask your agent to "draw an orange cat in the editor" or "add a hat to this smiley": it reads the current picture and draws into it, with no extra API key.
+
+When the status changes, a band of light sweeps across the panel (noticeable from across the room), a big badge says what happened (spinner, exclamation mark, check, cross), and then a colourful blob stays: glancing around with dots filling up while working, hopping while it waits for you, smiling when done, shivering on errors, asleep when idle, over a dim moving light in the same colour. Everything is big solid colour with few shades, so it reads at 32×32; give each agent its own colours with `color` and no text label is needed to tell them apart.
 
 A hook CLI switches status automatically from agent lifecycle hooks (e.g. prompt submitted → thinking, needs approval → waiting, turn finished → done). A mood the agent chose is held for 12 s before hook updates may replace it.
 
@@ -93,7 +95,7 @@ Other programs (say, a tray tool that merges several agents' states) can call th
 {"kind": "pixels", "frames": [[]], "palette": {}}
 ```
 
-`color` is optional and replaces the status icon's and label's own colour (e.g. one colour per agent); the second line is an empty frame that switches the panel dark.
+`color` is optional and replaces the status picture's and label's own colour (e.g. one colour per agent; without a label the picture fills the panel); sending the scene that is already showing does not replay its intro; the second line is an empty frame that switches the panel dark.
 
 ## How it works
 

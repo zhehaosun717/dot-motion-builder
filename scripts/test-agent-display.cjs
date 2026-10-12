@@ -11,7 +11,7 @@ require.extensions['.ts'] = (mod, filename) => mod._compile(ts.transpileModule(f
 const {MOODS} = require('../src/lib/agent-display/face.ts');
 const {STATUSES} = require('../src/lib/agent-display/status-icons.ts');
 const {wrapText, measureText} = require('../src/lib/agent-display/font.ts');
-const {renderScene, parseScene, isAnimated} = require('../src/lib/agent-display/scene.ts');
+const {renderScene, parseScene, isAnimated, sameScene} = require('../src/lib/agent-display/scene.ts');
 
 const N = 32 * 32;
 const lit = rgb => { let n = 0; for (let i = 0; i < N; i++) if (rgb[i * 3] || rgb[i * 3 + 1] || rgb[i * 3 + 2]) n++; return n; };
@@ -47,6 +47,33 @@ assert(!litColours(tinted).has('40,230,80'), "the status's own colour is replace
 assert(lit(tinted.subarray(26 * 32 * 3)) > 0 && [...litColours(tinted.subarray(26 * 32 * 3))].every(c => c === '217,119,87'), 'the label uses the given colour');
 assert.equal(lit(renderScene(parseScene({kind: 'status', status: 'done', color: 'D97757'}), 1500)), lit(renderScene(parseScene({kind: 'status', status: 'done'}), 1500)), 'colour without # is accepted and keeps the shape');
 assert.throws(() => parseScene({kind: 'status', status: 'done', color: 'orange'}), /color/);
+
+// A new status is announced: a sweep of light, then a badge, then the blob stays. Idle just appears.
+const AMBER = [240, 180, 60];
+const amberAt = (status, t) => renderScene(parseScene({kind: 'status', status, color: '#F0B43C'}), t);
+for (const status of STATUSES.filter(s => s !== 'idle')) {
+  const sweep = amberAt(status, 250);
+  assert(lit(sweep) > 150 && pixel(sweep, 0, 0).some(v => v) && pixel(sweep, 31, 31).every(v => v === 0), `${status} sweeps in from the top left`);
+  if (status !== 'working') assert.deepEqual(pixel(amberAt(status, 1000), 5, 16), AMBER, `${status} badge is a solid disc`);
+  const blob = amberAt(status, 3000);
+  assert.deepEqual(pixel(blob, 15, 18), AMBER, `${status} blob body is solid`);
+  assert(lit(blob) > 250, `${status} blob is a big shape (${lit(blob)} lit)`);
+}
+const ring = amberAt('working', 1000);
+assert(lit(ring) > 150 && pixel(ring, 15, 4).some(v => v) && pixel(ring, 15, 11).every(v => v === 0), 'working badge is a thick ring around a core');
+const faceRow = (rgb, y) => [...Array(16).keys()].map(i => pixel(rgb, i + 8, y)).filter(p => p.every(v => v === 0)).length;
+assert(faceRow(amberAt('working', 3000), 14) >= 4 && faceRow(amberAt('done', 3000), 14) >= 2, 'the face is cut out of the body');
+assert(lit(amberAt('idle', 100)) < 400 && pixel(amberAt('idle', 100), 0, 0).every(v => v === 0), 'idle skips the sweep');
+const sleeping = pixel(amberAt('idle', 3000), 15, 24);
+assert(sleeping.some(v => v) && sleeping[0] < AMBER[0] * 0.6, 'idle blob is dim');
+const labelledBlob = renderScene(parseScene({kind: 'status', status: 'waiting', label: 'tests'}), 3000);
+assert([...Array(32).keys()].every(x => pixel(labelledBlob, x, 26).every(v => v === 0)), 'the picture stays above the label');
+
+// Re-sending the scene that is showing must not restart it.
+const shown = parseScene({kind: 'status', status: 'working', color: '#D97757'});
+assert(sameScene(shown, parseScene({kind: 'status', status: 'working', color: '#D97757'})), 'same scene');
+assert(!sameScene(shown, parseScene({kind: 'status', status: 'working', color: '#3C82FF'})), 'another colour is a new scene');
+assert(!sameScene(null, shown), 'nothing shown yet');
 
 // An empty pixel frame blanks the panel (used to switch it off), once.
 const blank = parseScene({kind: 'pixels', frames: [[]], palette: {}});
@@ -129,4 +156,4 @@ assert.throws(() => parseScene({kind: 'teleport'}), /kind/);
 if (process.env.AGENT_PREVIEW_OUT) {
   fs.writeFileSync(process.env.AGENT_PREVIEW_OUT, JSON.stringify(previews.map(([name, rgb]) => [name, Buffer.from(rgb).toString('base64')])));
 }
-console.log(`PASS: agent display — ${MOODS.length} moods, ${STATUSES.length} statuses with labels, text wrap/marquee, palette pixel art, validation.`);
+console.log(`PASS: agent display — ${MOODS.length} moods, ${STATUSES.length} statuses (sweep, badge, blob) with labels, text wrap/marquee, palette pixel art, validation.`);

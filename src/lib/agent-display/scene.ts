@@ -73,6 +73,11 @@ function textLayout(text: string) {
   return { cjk, lines: fits ? lines : [text.replace(/\s+/g, " ")], marquee: !fits };
 }
 
+/** Whether two scenes show the same thing, so sending one again does not restart its animation. */
+export function sameScene(a: AgentScene | null, b: AgentScene) {
+  return a !== null && JSON.stringify(a) === JSON.stringify(b);
+}
+
 /** Whether frames change over time (static scenes only need to be sent once). */
 export function isAnimated(scene: AgentScene) {
   if (scene.kind === "text") return textLayout(scene.text).marquee;
@@ -133,8 +138,9 @@ export function renderScene(scene: AgentScene, t: number): Uint8Array {
       break;
     case "status": {
       const color = scene.color ? parseHex(scene.color) : statusColor(scene.status);
-      // Icons move up to make room for a label; a Chinese label needs a 10px band.
-      paintStatus(canvas, scene.status, time, !scene.label ? 16 : needsCjk(scene.label) ? 10 : 12, color);
+      // A label takes the bottom band (a Chinese one needs 10px); the picture shrinks to fit above it.
+      const rows = !scene.label ? SIZE : needsCjk(scene.label) ? CJK_LABEL_TOP - 1 : LABEL_TOP;
+      paintStatus(canvas, scene.status, time, color, rows);
       if (scene.label) paintLabel(canvas, scene.label, color, time);
       break;
     }

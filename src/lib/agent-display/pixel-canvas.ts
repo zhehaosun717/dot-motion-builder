@@ -10,6 +10,12 @@ export function dimmed(color: Rgb, factor: number): Rgb {
   return [Math.round(color[0] * f), Math.round(color[1] * f), Math.round(color[2] * f)];
 }
 
+/** Mixes a colour towards white (0..1), for highlights that keep the colour's hue. */
+export function lightened(color: Rgb, factor: number): Rgb {
+  const f = Math.max(0, Math.min(1, factor));
+  return [Math.round(color[0] + (255 - color[0]) * f), Math.round(color[1] + (255 - color[1]) * f), Math.round(color[2] + (255 - color[2]) * f)];
+}
+
 /**
  * A 32x32 RGB drawing surface for agent scenes. Each scene builds its own canvas and returns its
  * pixels, so the in-place drawing stays local to one frame.
