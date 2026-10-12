@@ -275,9 +275,19 @@ async function main() {
   const near = (actual, expected, tolerance, what) => assert(Math.abs(actual - expected) <= tolerance, `${what}: ${actual} not within ${tolerance} of ${expected}`);
   assert.deepEqual(calibrateToPanel(0, 0, 0), [0, 0, 0], 'black stays black');
   const calWhite = calibrateToPanel(255, 255, 255);
-  assert.equal(calWhite[0], 255, 'white drives red fully (the strongest channel after balancing)');
-  near(calWhite[1], 211, 6, 'white: green cut to balance D65');
+  near(calWhite[0], 205, 6, 'white: red pulled back by the grey balance (it runs strong when all channels are high)');
+  near(calWhite[1], 222, 6, 'white: green as the grey balance measured');
   near(calWhite[2], 61, 5, 'white: the strong blue cut to about a quarter');
+  // Grey balance: per-channel curves measured on a grey ramp; monotonic, keep black, stay in range.
+  const {GREY_BALANCE, balanceGrey} = require('../src/lib/idotmatrix/panel-profile.ts');
+  assert.equal(GREY_BALANCE.length, 3, 'one curve per channel');
+  for (let c = 0; c < 3; c++) {
+    assert.equal(balanceGrey(c, 0), 0, 'grey balance keeps black');
+    const outs = [...Array(256).keys()].map(d => balanceGrey(c, d));
+    assert(outs.every((v, i) => v >= 0 && v <= 255 && (i === 0 || v >= outs[i - 1])), `grey balance curve ${c} is monotonic and in range`);
+  }
+  const midGrey = calibrateToPanel(160, 160, 160);
+  assert(midGrey[0] < 79 && midGrey[1] > 74, `mid grey: less red and more green than the matrix alone gave (79,74,22) (${midGrey})`);
   const calTerracotta = calibrateToPanel(217, 119, 87);
   assert(calTerracotta[0] > 2 * calTerracotta[1] && calTerracotta[2] < 12, `terracotta becomes a real orange drive (${calTerracotta})`);
   const calGrey = calibrateToPanel(128, 128, 128);

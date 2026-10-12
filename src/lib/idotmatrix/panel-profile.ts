@@ -78,10 +78,38 @@ function inverseResponse(curve: readonly number[]) {
 const INVERSE = [inverseResponse(PANEL_PROFILE.response.red), inverseResponse(PANEL_PROFILE.response.green), inverseResponse(PANEL_PROFILE.response.blue)];
 
 /**
+ * Grey balance, per channel: [drive from the matrix, drive that makes that grey neutral], measured 2026-10-12 on a
+ * grey ramp (48..255) shown through the matrix calibration. Greys came out slightly red-magenta (xy ~0.316, 0.324):
+ * red needs ~3.5% less, green ~1.7% more, blue ~3% less, and red runs strong when all channels are near full.
+ */
+export const GREY_BALANCE: readonly (readonly (readonly [number, number])[])[] = [
+  [[7, 6.4], [12, 11.2], [18, 17.3], [26, 25.3], [37, 35], [49, 47.1], [63, 60.6], [79, 76.2], [98, 94.8], [119, 114.6], [143, 138.6], [169, 163.7], [199, 191.6], [255, 205.2]],
+  [[6, 6.3], [11, 11.3], [17, 17.3], [25, 25.3], [34, 34.9], [46, 46.8], [59, 60.1], [74, 75.4], [92, 93.6], [111, 112.9], [134, 136.1], [158, 160.4], [184, 187], [211, 221.5]],
+  [[2, 1.8], [3, 3.1], [5, 4.8], [7, 7], [10, 9.7], [13, 13], [17, 16.7], [22, 20.9], [27, 26], [32, 31.4], [39, 37.7], [46, 44.5], [53, 51.8], [62, 61.4]]
+];
+
+/**
+ * Applies one channel's grey-balance curve to a drive level: linear between measured points, proportional below the
+ * first one, and from the last point straight up to 255 at 255.
+ */
+export function balanceGrey(channel: number, drive: number): number {
+  const points = GREY_BALANCE[channel];
+  const [firstIn, firstOut] = points[0];
+  if (drive <= firstIn) return (drive * firstOut) / firstIn;
+  for (let i = 1; i < points.length; i++) {
+    const [inA, outA] = points[i - 1];
+    const [inB, outB] = points[i];
+    if (drive <= inB) return outA + ((drive - inA) * (outB - outA)) / (inB - inA);
+  }
+  const [lastIn, lastOut] = points[points.length - 1];
+  return lastIn >= 255 ? lastOut : lastOut + ((drive - lastIn) * (255 - lastOut)) / (255 - lastIn);
+}
+
+/**
  * The panel drive that shows an sRGB colour as a monitor would: linearise, map onto the measured primaries with a
- * D65 white, clip what the panel cannot show, then undo each channel's measured response.
+ * D65 white, clip what the panel cannot show, undo each channel's measured response, then balance greys.
  */
 export function calibrateToPanel(r: number, g: number, b: number): [number, number, number] {
   const linear = multiply(SRGB_TO_PANEL, [SRGB_LINEAR[r], SRGB_LINEAR[g], SRGB_LINEAR[b]]);
-  return linear.map((value, c) => Math.round(INVERSE[c](Math.min(1, Math.max(0, value))))) as [number, number, number];
+  return linear.map((value, c) => Math.round(balanceGrey(c, INVERSE[c](Math.min(1, Math.max(0, value)))))) as [number, number, number];
 }
