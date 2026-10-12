@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { usesCalibration } from "@/lib/idotmatrix/panel-tuning";
 import { renderMatrixAt, renderMatrixStill } from "@/lib/idotmatrix/render-frames";
 import { useMatrixStore } from "@/stores/use-matrix-store";
 import { LoaderComponent, Project } from "@/types/dot-motion";
@@ -14,19 +15,21 @@ export function useLiveEditorSync(project: Project, loader: LoaderComponent | un
   const live = useMatrixStore((state) => state.live);
   const showInactive = useMatrixStore((state) => state.showInactive);
   const gaps = useMatrixStore((state) => state.pixelGaps);
+  // The measured calibration linearises frames itself, so they are rendered as plain sRGB for it.
+  const encoded = useMatrixStore((state) => usesCalibration(state.tuning));
   const pushFrame = useMatrixStore((state) => state.pushFrame);
   const playFrames = useMatrixStore((state) => state.playFrames);
   const active = live === "editor" && Boolean(loader);
 
   useEffect(() => {
     if (!active || animate || !loader) return;
-    pushFrame(renderMatrixStill(loader, { showInactive, gaps }));
-  }, [active, animate, gaps, loader, pushFrame, showInactive]);
+    pushFrame(renderMatrixStill(loader, { showInactive, gaps, encoded }));
+  }, [active, animate, encoded, gaps, loader, pushFrame, showInactive]);
 
   useEffect(() => {
     if (!active || !animate || !loader) return;
     const startedAt = Date.now();
-    playFrames((displayAt) => renderMatrixAt(project, loader, displayAt - startedAt, { showInactive, gaps }));
+    playFrames((displayAt) => renderMatrixAt(project, loader, displayAt - startedAt, { showInactive, gaps, encoded }));
     return () => playFrames(null);
-  }, [active, animate, gaps, loader, playFrames, project, showInactive]);
+  }, [active, animate, encoded, gaps, loader, playFrames, project, showInactive]);
 }

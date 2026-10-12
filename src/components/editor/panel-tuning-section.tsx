@@ -12,8 +12,9 @@ const tuningCopy = {
     title: "点阵屏色彩",
     collapse: "收起点阵屏色彩",
     expand: "展开点阵屏色彩",
-    hint: "只作用于发到屏幕的画面（实时同步、投屏、存到屏幕），编辑器和导出文件不变。开着实时同步拖动滑块，对照电脑屏幕调。照片可先试伽马 1.8–2.2。LED 亮度低于约 36 的点不亮，「暗部起亮」把渐变和暗色抬到能看见的亮度、亮部不变，比调低对比度更不容易发灰。白色偏紫、橙色偏粉时，把「蓝」调低。",
+    hint: "只作用于发到屏幕的画面（实时同步、投屏、存到屏幕），编辑器和导出文件不变。「实测校准」用色度计实测这块屏（IDM-0384DA）的数据，把颜色、白点和明暗换算成和电脑屏幕一致，默认 100%；调到 0 是原来没校准的效果。其余滑块在校准之上微调：屋里很亮、暗点看不清时调高「暗部起亮」；红 / 绿 / 蓝单独调每个通道。",
     reset: "恢复默认",
+    calibration: "实测校准",
     brightness: "亮度",
     contrast: "对比度",
     saturation: "饱和度",
@@ -28,8 +29,9 @@ const tuningCopy = {
     title: "Panel Colour",
     collapse: "Collapse panel colour",
     expand: "Expand panel colour",
-    hint: "Only affects what is sent to the panel (live sync, mirroring, Save to Panel); the editor and exported files stay as they are. Turn on live sync and compare against your monitor. For photos, try gamma 1.8–2.2. LEDs stay dark below about 36; Dark floor lifts fades and dim colours into the visible range while leaving highlights alone, which keeps more contrast than lowering Contrast. If white looks lavender and orange looks pink, lower Blue.",
+    hint: "Only affects what is sent to the panel (live sync, mirroring, Save to Panel); the editor and exported files stay as they are. Measured calibration uses colorimeter data from this panel (IDM-0384DA) to match colours, white point and tones to your monitor; 100% by default, 0 gives the old uncalibrated look. The other sliders fine-tune on top: raise Dark floor if faint dots get lost in a bright room; Red / Green / Blue trim each channel.",
     reset: "Reset",
+    calibration: "Measured calibration",
     brightness: "Brightness",
     contrast: "Contrast",
     saturation: "Saturation",
@@ -43,6 +45,7 @@ const tuningCopy = {
 } as const;
 
 const UNITS: Record<PanelTuningKey, string | undefined> = {
+  calibration: "%",
   brightness: "%",
   contrast: "%",
   saturation: "%",

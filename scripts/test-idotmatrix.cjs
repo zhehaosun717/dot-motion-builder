@@ -157,6 +157,15 @@ async function main() {
   const dim = pixel(ghostOn, 2, 2);
   assert(dim[2] > 0 && dim[2] < 0x43, 'inactive dots render dimmed in the inactive colour');
   assert.deepEqual(pixel(ghostOff, 2, 2), [0, 0, 0], 'inactive dots can be switched off');
+  // With the measured calibration the frames stay plain sRGB (it linearises once), so neither the inactive colour
+  // nor fades get the LED gamma here.
+  const ghostEncoded = pixel(renderMatrixFrames(projectWith(ghost), ghost, {showInactive: true, encoded: true}).frames[0], 2, 2);
+  assert(ghostEncoded[2] > dim[2], `encoded frames keep the inactive colour unlinearised (${ghostEncoded} vs ${dim})`);
+  const fader = makeLoader(4, 'breathing');
+  const linearFade = renderMatrixFrames(projectWith(fader), fader, {showInactive: false}).frames;
+  const encodedFade = renderMatrixFrames(projectWith(fader), fader, {showInactive: false, encoded: true}).frames;
+  const dimmest = frames => Math.min(...frames.map(f => pixel(f, 2, 2)[0]).filter(v => v > 0));
+  assert(dimmest(encodedFade) > dimmest(linearFade), 'encoded fades are not pre-darkened by the LED gamma');
 
   const circle = makeLoader(3, 'breathing', [4]);
   circle.style.cellShape = 'circle';
@@ -261,10 +270,32 @@ async function main() {
   assert(cool[2] === 200 && cool[0] < 200, 'cool cuts red');
   assert(tune([100, 100, 100], {contrast: 200})[0] < 100 && tune([180, 180, 180], {contrast: 200})[0] > 180, 'contrast spreads from mid grey');
   assert.deepEqual(tune([100, 100, 100], {brightness: 50}), [50, 50, 50], 'brightness scales');
-  // Dark floor: this panel only lights from about 36 (measured on IDM-0384DA), so dim colours are lifted into
-  // the range it can show instead of vanishing. On by default; 0 turns it off.
+  // Measured calibration (IDM-0384DA, colorimeter): sRGB -> linear light -> panel primaries -> measured channel curves.
+  const {calibrateToPanel, PANEL_PROFILE} = require('../src/lib/idotmatrix/panel-profile.ts');
+  const near = (actual, expected, tolerance, what) => assert(Math.abs(actual - expected) <= tolerance, `${what}: ${actual} not within ${tolerance} of ${expected}`);
+  assert.deepEqual(calibrateToPanel(0, 0, 0), [0, 0, 0], 'black stays black');
+  const calWhite = calibrateToPanel(255, 255, 255);
+  assert.equal(calWhite[0], 255, 'white drives red fully (the strongest channel after balancing)');
+  near(calWhite[1], 211, 6, 'white: green cut to balance D65');
+  near(calWhite[2], 61, 5, 'white: the strong blue cut to about a quarter');
+  const calTerracotta = calibrateToPanel(217, 119, 87);
+  assert(calTerracotta[0] > 2 * calTerracotta[1] && calTerracotta[2] < 12, `terracotta becomes a real orange drive (${calTerracotta})`);
+  const calGrey = calibrateToPanel(128, 128, 128);
+  assert(calGrey[0] < 70 && calGrey[0] > 40, `mid grey is linearised like a monitor shows it (${calGrey})`);
+  assert(calibrateToPanel(64, 64, 64)[0] < calGrey[0] && calGrey[0] < calWhite[0], 'grey ramp stays monotonic');
+  for (const rgb of [[255, 0, 0], [0, 255, 0], [0, 0, 255], [255, 255, 0]]) {
+    assert(calibrateToPanel(...rgb).every(c => c >= 0 && c <= 255), `out-of-gamut ${rgb} is clipped into range`);
+  }
+  assert.equal(PANEL_PROFILE.device, 'IDM-0384DA');
   const {DEFAULT_PANEL_TUNING} = require('../src/lib/idotmatrix/panel-tuning.ts');
-  assert.equal(DEFAULT_PANEL_TUNING.floor, 36, 'the measured floor is the default');
+  assert.equal(DEFAULT_PANEL_TUNING.calibration, 100, 'measured calibration is on by default');
+  assert.equal(NEUTRAL_PANEL_TUNING.calibration, 0, 'calibration 0 is the raw panel');
+  assert.deepEqual(tune([217, 119, 87], {calibration: 100}), calibrateToPanel(217, 119, 87), 'full calibration sends the calibrated drive');
+  const half = tune([255, 255, 255], {calibration: 50});
+  assert(half[2] < 255 && half[2] > calWhite[2], 'half calibration blends raw and calibrated');
+  // Dark floor: off by default now that the colorimeter shows every channel lighting linearly from 8;
+  // kept for bright rooms where faint dots get lost.
+  assert.equal(DEFAULT_PANEL_TUNING.floor, 0, 'no floor by default (the panel is linear down to 8)');
   assert.equal(NEUTRAL_PANEL_TUNING.floor, 0, 'floor 0 is the no-op');
   const floored = rgb => tune(rgb, {floor: 36});
   assert.deepEqual(floored([0, 0, 0]), [0, 0, 0], 'unlit stays unlit');
@@ -289,8 +320,9 @@ async function main() {
   assert.deepEqual(tune([0, 0, 200], {blueGain: 70, floor: 36}), [0, 0, Math.round(36 + 219 * 140 / 255)], 'gains apply before the floor lift');
   assert.deepEqual(sanitizePanelTuning({brightness: 999, gamma: 1.2000000000000002, warmth: 'x'}), {...DEFAULT_PANEL_TUNING, brightness: 200, gamma: 1.2}, 'stored tuning is clamped and rounded');
   assert.deepEqual(sanitizePanelTuning(null), DEFAULT_PANEL_TUNING, 'nothing stored: the measured defaults');
-  assert.equal(sanitizePanelTuning({brightness: 120}).floor, 36, 'tuning saved before the floor existed gets the default floor');
-  assert(isNeutralTuning(sanitizePanelTuning({floor: 0})));
+  const older = sanitizePanelTuning({brightness: 120});
+  assert(older.floor === 0 && older.calibration === 100, 'tuning saved before these settings existed gets the measured defaults');
+  assert(isNeutralTuning(sanitizePanelTuning({floor: 0, calibration: 0})));
   assert(!isNeutralTuning(sanitizePanelTuning({})));
   const tunedLoader = makeLoader(8, 'static');
   const plainGif = buildMatrixGif(projectWith(tunedLoader), tunedLoader, {showInactive: false});

@@ -1,9 +1,16 @@
+import { calibrateToPanel } from "@/lib/idotmatrix/panel-profile";
+
 /**
  * Colour correction for what goes to the LED panel only (the editor and file exports stay untouched).
- * A raw LED drives sRGB values linearly, so photos look washed out and colder than on a monitor;
- * these knobs let you match the panel to the screen by eye.
+ * A raw LED drives sRGB values linearly, so photos look washed out and colder than on a monitor. The measured
+ * calibration (panel-profile) fixes that from colorimeter data; the other knobs fine-tune by eye.
  */
 export type PanelTuning = {
+  /**
+   * Measured calibration, percent: 100 converts sRGB to this panel's primaries and white so it shows colours like
+   * a monitor; 0 sends raw values (the old, paler and bluer look).
+   */
+  calibration: number;
   /** Overall drive level, percent (100 = unchanged). */
   brightness: number;
   /** Spread around mid grey, percent (100 = unchanged). */
@@ -15,8 +22,8 @@ export type PanelTuning = {
   /** White balance, -100 (cooler) .. 100 (warmer); 0 = unchanged. */
   warmth: number;
   /**
-   * Lowest drive level the panel shows (0 = off). LEDs stay dark below roughly 36 of 255, so fades and dim
-   * colours would vanish; lit pixels are remapped into floor..255 instead.
+   * Lowest drive level for lit pixels (0 = off). The LEDs are linear down to level 8, but faint dots get lost in
+   * a bright room; lit pixels are then remapped into floor..255.
    */
   floor: number;
   /** Per-channel drive, percent (100 = unchanged): fine white balance when one LED colour runs strong. */
@@ -29,13 +36,14 @@ export type PanelTuningKey = keyof PanelTuning;
 
 /** neutral changes nothing; initial is what a panel starts with (and what Reset returns to). */
 export const PANEL_TUNING_RANGES: Record<PanelTuningKey, { min: number; max: number; step: number; neutral: number; initial: number }> = {
+  calibration: { min: 0, max: 100, step: 5, neutral: 0, initial: 100 },
   brightness: { min: 10, max: 200, step: 5, neutral: 100, initial: 100 },
   contrast: { min: 50, max: 200, step: 5, neutral: 100, initial: 100 },
   saturation: { min: 0, max: 200, step: 5, neutral: 100, initial: 100 },
   gamma: { min: 0.5, max: 3, step: 0.1, neutral: 1, initial: 1 },
   warmth: { min: -100, max: 100, step: 5, neutral: 0, initial: 0 },
-  // Measured on an IDM-0384DA 32x32: red, green, blue and white all start to light between 32 and 40.
-  floor: { min: 0, max: 80, step: 2, neutral: 0, initial: 36 },
+  // A colorimeter shows every channel linear from level 8, so no floor by default (photos had suggested ~36).
+  floor: { min: 0, max: 80, step: 2, neutral: 0, initial: 0 },
   redGain: { min: 20, max: 150, step: 1, neutral: 100, initial: 100 },
   greenGain: { min: 20, max: 150, step: 1, neutral: 100, initial: 100 },
   blueGain: { min: 20, max: 150, step: 1, neutral: 100, initial: 100 }
@@ -48,7 +56,7 @@ const tuningFrom = (pick: "neutral" | "initial") =>
 
 /** Changes nothing. */
 export const NEUTRAL_PANEL_TUNING: PanelTuning = tuningFrom("neutral");
-/** Where a panel starts: unchanged colours with the measured dark floor. */
+/** Where a panel starts: the measured calibration, nothing else changed. */
 export const DEFAULT_PANEL_TUNING: PanelTuning = tuningFrom("initial");
 
 /** Below this (of 255) a pixel is rounding noise from a fade's tail and stays off rather than being lifted. */
@@ -84,8 +92,15 @@ function whiteBalanceGains(warmth: number): [number, number, number] {
   return [1 + WARMTH_BLUE * amount, 1 + WARMTH_GREEN * amount, 1];
 }
 
+/** Whether frames for the panel should be rendered as plain sRGB (the calibration then linearises them once). */
+export function usesCalibration(tuning: PanelTuning | undefined): boolean {
+  return Boolean(tuning && tuning.calibration > 0);
+}
+
 /**
  * Returns a corrected copy of a packed RGB frame (or the same array when the tuning is neutral).
+ * Order: look adjustments on the sRGB picture (saturation, contrast, brightness, gamma), then the measured
+ * calibration, then per-channel trims (warmth, gains) and the dark floor on the panel drive.
  * Pure black stays black: an unlit LED must not start glowing because contrast or warmth moved.
  */
 export function applyPanelTuning(rgb: Uint8Array, tuning: PanelTuning): Uint8Array {
@@ -93,6 +108,7 @@ export function applyPanelTuning(rgb: Uint8Array, tuning: PanelTuning): Uint8Arr
   const saturation = tuning.saturation / 100;
   const contrast = tuning.contrast / 100;
   const brightness = tuning.brightness / 100;
+  const calibration = tuning.calibration / 100;
   const warmthGains = whiteBalanceGains(tuning.warmth);
   const channelGains = [tuning.redGain, tuning.greenGain, tuning.blueGain];
   const gains = warmthGains.map((gain, c) => (gain * channelGains[c]) / 100);
@@ -101,12 +117,16 @@ export function applyPanelTuning(rgb: Uint8Array, tuning: PanelTuning): Uint8Arr
     const [r, g, b] = [rgb[i] / 255, rgb[i + 1] / 255, rgb[i + 2] / 255];
     if (r === 0 && g === 0 && b === 0) continue;
     const luma = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-    [r, g, b].forEach((channel, c) => {
+    const looked = [r, g, b].map((channel) => {
       const saturated = luma + (channel - luma) * saturation;
       const contrasted = (saturated - 0.5) * contrast + 0.5;
-      const lit = clamp(contrasted * brightness, 0, 1) ** tuning.gamma;
-      out[i + c] = Math.round(clamp(lit * gains[c], 0, 1) * 255);
+      return Math.round(clamp(contrasted * brightness, 0, 1) ** tuning.gamma * 255);
     });
+    const calibrated = calibration > 0 ? calibrateToPanel(looked[0], looked[1], looked[2]) : looked;
+    for (let c = 0; c < 3; c++) {
+      const drive = looked[c] + (calibrated[c] - looked[c]) * calibration;
+      out[i + c] = Math.round(clamp((drive / 255) * gains[c], 0, 1) * 255);
+    }
   }
   return tuning.floor > 0 ? liftToFloor(out, tuning.floor) : out;
 }

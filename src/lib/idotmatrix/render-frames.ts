@@ -6,8 +6,12 @@ import { LoaderComponent, Project } from "@/types/dot-motion";
 
 export type MatrixLayout = { cell: number; gap: number; offsetX: number; offsetY: number };
 /** gaps: leave a dark line between scaled-up cells (dot-matrix look); off fills the panel edge to edge. */
-export type MatrixRenderOptions = { showInactive: boolean; gaps?: boolean; maxFrames?: number };
-type FrameOptions = Pick<MatrixRenderOptions, "showInactive" | "gaps">;
+/**
+ * encoded: keep frames as plain sRGB (fades and the inactive colour without the LED gamma), for the measured
+ * panel calibration, which linearises everything once.
+ */
+export type MatrixRenderOptions = { showInactive: boolean; gaps?: boolean; maxFrames?: number; encoded?: boolean };
+type FrameOptions = Pick<MatrixRenderOptions, "showInactive" | "gaps" | "encoded">;
 export type MatrixFrames = { frames: Uint8Array[]; delaysCs: number[]; fps: number };
 
 type FramePlan = { loader: LoaderComponent; progress: number; discrete: boolean; delayCs: number };
@@ -111,13 +115,13 @@ function paintDot(target: Float32Array, style: FrameStyle, x0: number, y0: numbe
   }
 }
 
-const toLevel = (value: number, levels: number) => Math.round(clamp(value, 0, 1) ** FADE_GAMMA * levels) / levels;
+const toLevel = (value: number, levels: number, gamma: number) => Math.round(clamp(value, 0, 1) ** gamma * levels) / levels;
 
-function compose(active: Float32Array, activeColors: Uint8Array, inactive: Float32Array, style: FrameStyle) {
+function compose(active: Float32Array, activeColors: Uint8Array, inactive: Float32Array, style: FrameStyle, gamma: number) {
   const rgb = new Uint8Array(PIXELS * 3);
   for (let i = 0; i < PIXELS; i++) {
-    const a = toLevel(active[i], ACTIVE_LEVELS);
-    const b = toLevel(inactive[i], INACTIVE_LEVELS) * (1 - a);
+    const a = toLevel(active[i], ACTIVE_LEVELS, gamma);
+    const b = toLevel(inactive[i], INACTIVE_LEVELS, gamma) * (1 - a);
     for (let c = 0; c < 3; c++) {
       const inactiveChannel = c === 0 ? style.inactive.r : c === 1 ? style.inactive.g : style.inactive.b;
       rgb[i * 3 + c] = Math.round(activeColors[i * 3 + c] * a + inactiveChannel * b);
@@ -126,13 +130,14 @@ function compose(active: Float32Array, activeColors: Uint8Array, inactive: Float
   return rgb;
 }
 
-function renderFrame(plan: FramePlan, { showInactive, gaps }: FrameOptions) {
+function renderFrame(plan: FramePlan, { showInactive, gaps, encoded }: FrameOptions) {
+  const inactiveColor = hexToRgb(plan.loader.style.backgroundColor ?? "#2D3743");
   const { loader, progress, discrete } = plan;
   const { rows, cols } = loader.pattern.grid;
   const layout = getMatrixLayout(rows, cols, { gaps });
   const style: FrameStyle = {
     primary: hexToRgb(loader.style.primaryColor),
-    inactive: linearize(hexToRgb(loader.style.backgroundColor ?? "#2D3743")),
+    inactive: encoded ? inactiveColor : linearize(inactiveColor),
     layout,
     mask: getShapeMask(loader.style.cellShape, loader.style.innerRadius, layout.cell)
   };
@@ -160,7 +165,7 @@ function renderFrame(plan: FramePlan, { showInactive, gaps }: FrameOptions) {
       paintDot(active, style, x0, y0, motion.scale, (loader.style.primaryAlpha ?? 1) * motion.opacity, { colors: activeColors, rgb: colorOf(cellIndex) });
     }
   }
-  return compose(active, activeColors, inactive, style);
+  return compose(active, activeColors, inactive, style, encoded ? 1 : FADE_GAMMA);
 }
 
 /** The drawn pattern as it looks while editing: active cells fully lit, inactive dots at rest. */
