@@ -70,7 +70,8 @@ function fakePanel({imageAcks = true, ackDelayMs = 5} = {}) {
       if (done === 'gif') setTimeout(() => ack([5, 0, 1, 0, 3]), 1);
     }
   };
-  return {gatt: {name: 'IDM-TEST', write, notify, disconnect() {}}, writes, log};
+  const ackImage = () => { log.push('ack'); ack([5, 0, 0, 0, 1]); };
+  return {gatt: {name: 'IDM-TEST', write, notify, disconnect() {}}, writes, log, ackImage};
 }
 const fast = {packetGapMs: 0, ackTimeoutMs: 50, frameAckTimeoutMs: 40, diySettleMs: 0, cooldownMs: 0, retryDelayMs: 1};
 const messages = writes => {
@@ -160,12 +161,25 @@ async function main() {
   assert(Date.now() - t0 < 1000, 'missing frame acks only cost a short timeout');
   assert.equal(messages(mute.writes).length, 5, 'DIY + 4 frames');
 
-  // A frame ack that arrives after its timeout must not release the next frame early.
-  const lagging = fakePanel({ackDelayMs: 120});
+  // A frame ack that arrives after its timeout must not release a later frame early. Acks are sent by hand:
+  // timed acks landed on the same millisecond as the timeouts, so the order hung on timer jitter.
+  const lagging = fakePanel({imageAcks: false});
   const laggingLink = new MatrixLink(lagging.gatt, {...fast, frameAckTimeoutMs: 60});
-  for (let i = 0; i < 6; i++) await laggingLink.showFrame(png);
-  const ack3At = lagging.log.indexOf('ack3'), start5At = lagging.log.indexOf('start5');
-  assert(ack3At >= 0 && ack3At < start5At, `late acks are not credited to later frames (${lagging.log.join(' ')})`);
+  const settlesAtOnce = async promise => {
+    let done = false;
+    void promise.then(() => { done = true; });
+    await new Promise(r => setImmediate(r));
+    return done;
+  };
+  for (let i = 0; i < 3; i++) await laggingLink.showFrame(png); // frames 1 and 2 time out waiting for acks 0 and 1
+  lagging.ackImage(); lagging.ackImage(); // the late acks of frames 0 and 1
+  const lateStart = Date.now();
+  await laggingLink.showFrame(png); // frame 3 waits for frame 2's ack, which has not come
+  const lateWait = Date.now() - lateStart;
+  assert(lateWait >= 50, `late acks are not credited to later frames (frame 3 released after ${lateWait} ms: ${lagging.log.join(' ')})`);
+  lagging.ackImage(); // frame 2's ack, after its timeout: stale as well
+  lagging.ackImage(); // frame 3's ack, in time
+  assert(await settlesAtOnce(laggingLink.showFrame(png)), `an ack in time still releases the next frame (${lagging.log.join(' ')})`);
 
   // A frame still queued in the live stream when a GIF upload starts must not overwrite the GIF.
   const racing = fakePanel();
@@ -242,7 +256,8 @@ async function main() {
   const puller = new LiveFrameStream(async f => { pulled.push(f[0]); await sleep(15); }, {minIntervalMs: 0});
   const startedAt = Date.now();
   puller.play(at => Uint8Array.from({length: N * 3}, () => Math.floor((at - startedAt) / 10) % 256));
-  await sleep(200);
+  // Wait for the frames rather than a fixed 200 ms, which a busy machine can starve.
+  for (const giveUpAt = Date.now() + 2000; pulled.length < 6 && Date.now() < giveUpAt;) await sleep(10);
   puller.play(null);
   await puller.idle();
   const settled = pulled.length;
