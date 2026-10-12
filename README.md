@@ -86,6 +86,15 @@ node "%APPDATA%\Dot Matrix Studio\mcp\cli.cjs" mood happy
 node "%APPDATA%\Dot Matrix Studio\mcp\cli.cjs" text "构建通过"
 ```
 
+其他程序（比如自己汇总多个 agent 状态的托盘工具）也可以直接调用本机 API：从 `%APPDATA%\Dot Matrix Studio\agent-api.json` 读出 `port` 和 `token`，把场景 JSON POST 到 `http://127.0.0.1:<port>/api/scene?source=hook`，请求头带 `x-matrix-token: <token>`。返回的 `data.shown` 为 `false` 表示场景被 agent 主动设置的画面暂时挡住，稍后重发即可。
+
+```json
+{"kind": "status", "status": "working", "label": "Build", "color": "#D97757"}
+{"kind": "pixels", "frames": [[]], "palette": {}}
+```
+
+`color` 可选，用来替换状态图标和标签的默认颜色（比如每个 agent 用自己的颜色）；第二行是一个空帧，用来把屏幕熄灭。
+
 ## 工作原理
 
 - **蓝牙**：编辑器用 Web Bluetooth 直接和点阵屏通信。存到屏幕走 GIF 上传：每 4 KiB 一块，块头 16 字节，逐块等待屏幕确认。实时画面走 DIY 模式下的单帧 RGB PNG，最多一帧在途，包与包之间间隔 18ms，确认丢失时自动加大间隔。协议参考了 DeskDot 项目的硬件实测记录，并在 `IDM-0384DA` 上实测验证。

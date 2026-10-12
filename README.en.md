@@ -86,6 +86,15 @@ node "%APPDATA%\Dot Matrix Studio\mcp\cli.cjs" mood happy
 node "%APPDATA%\Dot Matrix Studio\mcp\cli.cjs" text "构建通过"
 ```
 
+Other programs (say, a tray tool that merges several agents' states) can call the local API directly: read `port` and `token` from `%APPDATA%\Dot Matrix Studio\agent-api.json` and POST a scene as JSON to `http://127.0.0.1:<port>/api/scene?source=hook` with the header `x-matrix-token: <token>`. A response with `data.shown` set to `false` means a scene the agent chose is holding the panel for now; send it again a little later.
+
+```json
+{"kind": "status", "status": "working", "label": "Build", "color": "#D97757"}
+{"kind": "pixels", "frames": [[]], "palette": {}}
+```
+
+`color` is optional and replaces the status icon's and label's own colour (e.g. one colour per agent); the second line is an empty frame that switches the panel dark.
+
 ## How it works
 
 - **Bluetooth**: the editor talks to the panel over Web Bluetooth. Saving to the panel uploads a GIF in 4 KiB chunks with a 16-byte header, waiting for each chunk's acknowledgement. Live frames are single RGB PNGs in the panel's DIY mode, at most one in flight, with an 18 ms gap between packets that grows if acknowledgements go missing. The protocol follows the DeskDot project's hardware notes and was verified on an `IDM-0384DA` panel.

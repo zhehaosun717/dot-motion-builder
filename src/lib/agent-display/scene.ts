@@ -28,7 +28,9 @@ export const sceneSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("status"),
     status: z.enum(STATUSES, { errorMap: () => ({ message: `status must be one of ${STATUSES.join(", ")}` }) }),
-    label: z.string().max(MAX_LABEL, `label must be at most ${MAX_LABEL} characters`).optional()
+    label: z.string().max(MAX_LABEL, `label must be at most ${MAX_LABEL} characters`).optional(),
+    /** Overrides the status's own colour for the icon and label. */
+    color: hexColor.optional()
   }),
   z.object({
     kind: z.literal("mood"),
@@ -129,11 +131,13 @@ export function renderScene(scene: AgentScene, t: number): Uint8Array {
     case "mood":
       paintMood(canvas, scene.mood, time);
       break;
-    case "status":
+    case "status": {
+      const color = scene.color ? parseHex(scene.color) : statusColor(scene.status);
       // Icons move up to make room for a label; a Chinese label needs a 10px band.
-      paintStatus(canvas, scene.status, time, !scene.label ? 16 : needsCjk(scene.label) ? 10 : 12);
-      if (scene.label) paintLabel(canvas, scene.label, statusColor(scene.status), time);
+      paintStatus(canvas, scene.status, time, !scene.label ? 16 : needsCjk(scene.label) ? 10 : 12, color);
+      if (scene.label) paintLabel(canvas, scene.label, color, time);
       break;
+    }
     case "text":
       paintText(canvas, scene.text, scene.color ? parseHex(scene.color) : DEFAULT_TEXT_COLOR, time);
       break;

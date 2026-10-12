@@ -75,9 +75,12 @@ const PAINTERS: Record<Status, IconPainter> = {
   }
 };
 
-/** One frame of a status icon centred vertically on cy. t is milliseconds since the status was set. */
-export function paintStatus(canvas: PixelCanvas, status: Status, t: number, cy = 16) {
-  PAINTERS[status](canvas, t, cy, STATUS_COLORS[status]);
+/**
+ * One frame of a status icon centred vertically on cy. t is milliseconds since the status was set.
+ * color replaces the status's own colour (e.g. so each assistant keeps its own colour).
+ */
+export function paintStatus(canvas: PixelCanvas, status: Status, t: number, cy = 16, color: Rgb = STATUS_COLORS[status]) {
+  PAINTERS[status](canvas, t, cy, color);
 }
 
 export function statusColor(status: Status): Rgb {

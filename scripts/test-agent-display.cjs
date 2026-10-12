@@ -39,6 +39,20 @@ for (const status of STATUSES) {
   previews.push([status, frames[2]]);
 }
 
+// A status can carry its sender's colour (icon and label), e.g. one colour per assistant.
+const litColours = rgb => new Set([...Array(N).keys()].filter(i => rgb[i * 3] || rgb[i * 3 + 1] || rgb[i * 3 + 2]).map(i => pixel(rgb, i % 32, Math.floor(i / 32)).join(',')));
+const tinted = renderScene(parseScene({kind: 'status', status: 'done', label: 'tests', color: '#D97757'}), 1500);
+assert(litColours(tinted).has('217,119,87'), 'the icon uses the given colour');
+assert(!litColours(tinted).has('40,230,80'), "the status's own colour is replaced");
+assert(lit(tinted.subarray(26 * 32 * 3)) > 0 && [...litColours(tinted.subarray(26 * 32 * 3))].every(c => c === '217,119,87'), 'the label uses the given colour');
+assert.equal(lit(renderScene(parseScene({kind: 'status', status: 'done', color: 'D97757'}), 1500)), lit(renderScene(parseScene({kind: 'status', status: 'done'}), 1500)), 'colour without # is accepted and keeps the shape');
+assert.throws(() => parseScene({kind: 'status', status: 'done', color: 'orange'}), /color/);
+
+// An empty pixel frame blanks the panel (used to switch it off), once.
+const blank = parseScene({kind: 'pixels', frames: [[]], palette: {}});
+assert.equal(lit(renderScene(blank, 0)), 0, 'empty frame is all black');
+assert(!isAnimated(blank), 'a blank panel is sent once');
+
 // Text: short text is static and centred, long text scrolls.
 assert.deepEqual(wrapText('hello there agent friend', 8), ['hello', 'there', 'agent', 'friend']);
 assert.deepEqual(wrapText('supercalifragilistic', 8), ['supercal', 'ifragili', 'stic']);
