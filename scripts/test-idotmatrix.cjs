@@ -261,9 +261,35 @@ async function main() {
   assert(cool[2] === 200 && cool[0] < 200, 'cool cuts red');
   assert(tune([100, 100, 100], {contrast: 200})[0] < 100 && tune([180, 180, 180], {contrast: 200})[0] > 180, 'contrast spreads from mid grey');
   assert.deepEqual(tune([100, 100, 100], {brightness: 50}), [50, 50, 50], 'brightness scales');
-  assert.deepEqual(sanitizePanelTuning({brightness: 999, gamma: 1.2000000000000002, warmth: 'x'}), {...NEUTRAL_PANEL_TUNING, brightness: 200, gamma: 1.2}, 'stored tuning is clamped and rounded');
-  assert.deepEqual(sanitizePanelTuning(null), NEUTRAL_PANEL_TUNING);
-  assert(isNeutralTuning(sanitizePanelTuning({})));
+  // Dark floor: this panel only lights from about 36 (measured on IDM-0384DA), so dim colours are lifted into
+  // the range it can show instead of vanishing. On by default; 0 turns it off.
+  const {DEFAULT_PANEL_TUNING} = require('../src/lib/idotmatrix/panel-tuning.ts');
+  assert.equal(DEFAULT_PANEL_TUNING.floor, 36, 'the measured floor is the default');
+  assert.equal(NEUTRAL_PANEL_TUNING.floor, 0, 'floor 0 is the no-op');
+  const floored = rgb => tune(rgb, {floor: 36});
+  assert.deepEqual(floored([0, 0, 0]), [0, 0, 0], 'unlit stays unlit');
+  assert.deepEqual(floored([255, 255, 255]), [255, 255, 255], 'full white unchanged');
+  assert.deepEqual(floored([2, 2, 2]), [0, 0, 0], 'rounding noise near black stays off');
+  const dimGrey = floored([10, 10, 10]);
+  assert(dimGrey[0] >= 36 && dimGrey[0] === dimGrey[1] && dimGrey[1] === dimGrey[2], 'a dim grey is lifted to a visible grey');
+  const dimOrange = floored([40, 22, 16]);
+  assert(dimOrange[0] > dimOrange[1] && dimOrange[1] >= dimOrange[2], 'a dim colour keeps its channel order');
+  assert(dimOrange.every(c => c === 0 || c >= 36), 'no channel is left in the range the LED cannot show');
+  assert.deepEqual(floored([60, 4, 0]), [Math.round(36 + 219 * 60 / 255), 0, 0], 'a negligible channel is dropped instead of tinting');
+  const ramp = [8, 16, 32, 64, 128].map(v => floored([v, 0, 0])[0]);
+  assert(ramp.every((v, i) => v >= 36 && (i === 0 || v > ramp[i - 1])), 'a fade keeps distinct, visible steps');
+  assert.deepEqual(tune([10, 10, 10], {floor: 0}), [10, 10, 10], 'floor 0 leaves dim colours alone');
+  // Per-channel gains: this panel's blue runs strong (white looks lavender, orange looks pink).
+  assert.deepEqual(tune([200, 200, 200], {blueGain: 70}), [200, 200, 140], 'blue gain scales only blue');
+  assert.deepEqual(tune([200, 100, 50], {redGain: 50, greenGain: 120}), [100, 120, 50], 'red and green gains scale their channel');
+  assert.deepEqual(tune([250, 250, 250], {greenGain: 150}), [250, 255, 250], 'gains clip at full drive');
+  assert.deepEqual(tune([0, 0, 0], {blueGain: 150}), [0, 0, 0], 'gains keep black unlit');
+  assert.deepEqual(tune([0, 0, 200], {blueGain: 70, floor: 36}), [0, 0, Math.round(36 + 219 * 140 / 255)], 'gains apply before the floor lift');
+  assert.deepEqual(sanitizePanelTuning({brightness: 999, gamma: 1.2000000000000002, warmth: 'x'}), {...DEFAULT_PANEL_TUNING, brightness: 200, gamma: 1.2}, 'stored tuning is clamped and rounded');
+  assert.deepEqual(sanitizePanelTuning(null), DEFAULT_PANEL_TUNING, 'nothing stored: the measured defaults');
+  assert.equal(sanitizePanelTuning({brightness: 120}).floor, 36, 'tuning saved before the floor existed gets the default floor');
+  assert(isNeutralTuning(sanitizePanelTuning({floor: 0})));
+  assert(!isNeutralTuning(sanitizePanelTuning({})));
   const tunedLoader = makeLoader(8, 'static');
   const plainGif = buildMatrixGif(projectWith(tunedLoader), tunedLoader, {showInactive: false});
   const tunedGif = buildMatrixGif(projectWith(tunedLoader), tunedLoader, {showInactive: false, tuning: {...NEUTRAL_PANEL_TUNING, gamma: 2.2}});

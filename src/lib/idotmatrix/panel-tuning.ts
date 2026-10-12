@@ -14,27 +14,47 @@ export type PanelTuning = {
   gamma: number;
   /** White balance, -100 (cooler) .. 100 (warmer); 0 = unchanged. */
   warmth: number;
+  /**
+   * Lowest drive level the panel shows (0 = off). LEDs stay dark below roughly 36 of 255, so fades and dim
+   * colours would vanish; lit pixels are remapped into floor..255 instead.
+   */
+  floor: number;
+  /** Per-channel drive, percent (100 = unchanged): fine white balance when one LED colour runs strong. */
+  redGain: number;
+  greenGain: number;
+  blueGain: number;
 };
 
 export type PanelTuningKey = keyof PanelTuning;
 
-export const PANEL_TUNING_RANGES: Record<PanelTuningKey, { min: number; max: number; step: number; neutral: number }> = {
-  brightness: { min: 10, max: 200, step: 5, neutral: 100 },
-  contrast: { min: 50, max: 200, step: 5, neutral: 100 },
-  saturation: { min: 0, max: 200, step: 5, neutral: 100 },
-  gamma: { min: 0.5, max: 3, step: 0.1, neutral: 1 },
-  warmth: { min: -100, max: 100, step: 5, neutral: 0 }
+/** neutral changes nothing; initial is what a panel starts with (and what Reset returns to). */
+export const PANEL_TUNING_RANGES: Record<PanelTuningKey, { min: number; max: number; step: number; neutral: number; initial: number }> = {
+  brightness: { min: 10, max: 200, step: 5, neutral: 100, initial: 100 },
+  contrast: { min: 50, max: 200, step: 5, neutral: 100, initial: 100 },
+  saturation: { min: 0, max: 200, step: 5, neutral: 100, initial: 100 },
+  gamma: { min: 0.5, max: 3, step: 0.1, neutral: 1, initial: 1 },
+  warmth: { min: -100, max: 100, step: 5, neutral: 0, initial: 0 },
+  // Measured on an IDM-0384DA 32x32: red, green, blue and white all start to light between 32 and 40.
+  floor: { min: 0, max: 80, step: 2, neutral: 0, initial: 36 },
+  redGain: { min: 50, max: 150, step: 1, neutral: 100, initial: 100 },
+  greenGain: { min: 50, max: 150, step: 1, neutral: 100, initial: 100 },
+  blueGain: { min: 50, max: 150, step: 1, neutral: 100, initial: 100 }
 };
 
 export const PANEL_TUNING_KEYS = Object.keys(PANEL_TUNING_RANGES) as PanelTuningKey[];
 
-export const NEUTRAL_PANEL_TUNING: PanelTuning = {
-  brightness: PANEL_TUNING_RANGES.brightness.neutral,
-  contrast: PANEL_TUNING_RANGES.contrast.neutral,
-  saturation: PANEL_TUNING_RANGES.saturation.neutral,
-  gamma: PANEL_TUNING_RANGES.gamma.neutral,
-  warmth: PANEL_TUNING_RANGES.warmth.neutral
-};
+const tuningFrom = (pick: "neutral" | "initial") =>
+  Object.fromEntries(PANEL_TUNING_KEYS.map((key) => [key, PANEL_TUNING_RANGES[key][pick]])) as PanelTuning;
+
+/** Changes nothing. */
+export const NEUTRAL_PANEL_TUNING: PanelTuning = tuningFrom("neutral");
+/** Where a panel starts: unchanged colours with the measured dark floor. */
+export const DEFAULT_PANEL_TUNING: PanelTuning = tuningFrom("initial");
+
+/** Below this (of 255) a pixel is rounding noise from a fade's tail and stays off rather than being lifted. */
+const FLOOR_NOISE = 3;
+/** A channel that would land under half the floor is dropped: lifting it would tint the colour. */
+const FLOOR_DROP = 0.5;
 
 /** Strongest channel cut at warmth ±100: warm dims blue (and some green), cool dims red. */
 const WARMTH_BLUE = 0.3;
@@ -50,10 +70,10 @@ export function isNeutralTuning(tuning: PanelTuning): boolean {
 export function sanitizePanelTuning(value: unknown): PanelTuning {
   const source = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
   const entries = PANEL_TUNING_KEYS.map((key) => {
-    const { min, max, neutral } = PANEL_TUNING_RANGES[key];
+    const { min, max, initial } = PANEL_TUNING_RANGES[key];
     const raw = source[key];
     // Rounded so slider steps like 0.1 do not leave 1.2000000000000002 behind.
-    return [key, typeof raw === "number" && Number.isFinite(raw) ? Number(clamp(raw, min, max).toFixed(2)) : neutral] as const;
+    return [key, typeof raw === "number" && Number.isFinite(raw) ? Number(clamp(raw, min, max).toFixed(2)) : initial] as const;
   });
   return Object.fromEntries(entries) as PanelTuning;
 }
@@ -73,7 +93,9 @@ export function applyPanelTuning(rgb: Uint8Array, tuning: PanelTuning): Uint8Arr
   const saturation = tuning.saturation / 100;
   const contrast = tuning.contrast / 100;
   const brightness = tuning.brightness / 100;
-  const gains = whiteBalanceGains(tuning.warmth);
+  const warmthGains = whiteBalanceGains(tuning.warmth);
+  const channelGains = [tuning.redGain, tuning.greenGain, tuning.blueGain];
+  const gains = warmthGains.map((gain, c) => (gain * channelGains[c]) / 100);
   const out = new Uint8Array(rgb.length);
   for (let i = 0; i + 2 < rgb.length; i += 3) {
     const [r, g, b] = [rgb[i] / 255, rgb[i + 1] / 255, rgb[i + 2] / 255];
@@ -85,6 +107,25 @@ export function applyPanelTuning(rgb: Uint8Array, tuning: PanelTuning): Uint8Arr
       const lit = clamp(contrasted * brightness, 0, 1) ** tuning.gamma;
       out[i + c] = Math.round(clamp(lit * gains[c], 0, 1) * 255);
     });
+  }
+  return tuning.floor > 0 ? liftToFloor(out, tuning.floor) : out;
+}
+
+/**
+ * Remaps each lit pixel's brightness (its strongest channel) from 0..255 to floor..255 and scales the other
+ * channels by the same factor, so the colour keeps its hue. A channel that would still sit below the floor is
+ * raised to it, or dropped when it is under half the floor (it would only tint the colour).
+ */
+function liftToFloor(rgb: Uint8Array, floor: number): Uint8Array {
+  const out = new Uint8Array(rgb.length);
+  for (let i = 0; i + 2 < rgb.length; i += 3) {
+    const peak = Math.max(rgb[i], rgb[i + 1], rgb[i + 2]);
+    if (peak < FLOOR_NOISE) continue;
+    const scale = (floor + ((255 - floor) * peak) / 255) / peak;
+    for (let c = 0; c < 3; c++) {
+      const lifted = rgb[i + c] * scale;
+      out[i + c] = lifted < floor * FLOOR_DROP ? 0 : Math.round(Math.max(lifted, floor));
+    }
   }
   return out;
 }

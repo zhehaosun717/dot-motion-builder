@@ -14,7 +14,7 @@ A Windows desktop app for the **iDotMatrix 32×32 Bluetooth LED panel**. No vend
 - **Live Sync**: every stroke and every preview animation shows on the panel immediately. Frames are sampled for the moment they light up; pixel-art frames stream at 40–50 fps.
 - **Mirror Screen**: pick a screen or window; it is scaled to 32×32 and colour-corrected for the LEDs.
 - **Save to Panel**: encodes the animation as a looping GIF in the panel's own memory, so it keeps playing after you disconnect.
-- **Panel colour**: brightness, contrast, saturation, gamma and warmth sliders correct only what is sent to the panel (live sync, mirroring, Save to Panel); the editor and exported files are untouched. Keep live sync on while you drag them to match your monitor; the settings are remembered.
+- **Panel colour**: brightness, contrast, saturation, gamma and warmth, plus Dark floor and red / green / blue gains, correct only what is sent to the panel (live sync, mirroring, Save to Panel); the editor and exported files are untouched. LEDs stay dark below about 36 of 255, so Dark floor (default 36) lifts fades and dim colours into the range the panel can show while leaving highlights alone; if white looks lavender and orange looks pink, lower Blue. Keep live sync on while you drag them to match your monitor; the settings are remembered.
 - **Chinese text**: a built-in 10px pixel font (all GB2312 simplified hanzi plus common traditional ones) fits 3 lines × 3 characters; longer text scrolls.
 
 ### Pixel animation editor

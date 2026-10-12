@@ -5,7 +5,7 @@ import { AgentScene, isAnimated, renderScene } from "@/lib/agent-display/scene";
 import { MATRIX_SIZE } from "@/lib/idotmatrix/constants";
 import { FrameSource, LiveFrameStream } from "@/lib/idotmatrix/live-stream";
 import { MatrixLink } from "@/lib/idotmatrix/matrix-link";
-import { applyPanelTuning, NEUTRAL_PANEL_TUNING, PanelTuning, sanitizePanelTuning } from "@/lib/idotmatrix/panel-tuning";
+import { applyPanelTuning, DEFAULT_PANEL_TUNING, PanelTuning, sanitizePanelTuning } from "@/lib/idotmatrix/panel-tuning";
 import { encodePng } from "@/lib/idotmatrix/png-encoder";
 import { ScreenMirror, startScreenMirror } from "@/lib/idotmatrix/screen-mirror";
 import { connectMatrix, MatrixError, MatrixErrorKind } from "@/lib/idotmatrix/web-bluetooth";
@@ -74,10 +74,10 @@ const TUNING_STORAGE_KEY = "dot-matrix-panel-tuning";
 function loadTuning(): PanelTuning {
   try {
     const stored = typeof window === "undefined" ? null : window.localStorage.getItem(TUNING_STORAGE_KEY);
-    return stored ? sanitizePanelTuning(JSON.parse(stored)) : NEUTRAL_PANEL_TUNING;
+    return stored ? sanitizePanelTuning(JSON.parse(stored)) : DEFAULT_PANEL_TUNING;
   } catch (error) {
     console.warn("[iDotMatrix] ignoring unreadable panel tuning", error);
-    return NEUTRAL_PANEL_TUNING;
+    return DEFAULT_PANEL_TUNING;
   }
 }
 
