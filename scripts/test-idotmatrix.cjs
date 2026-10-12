@@ -284,6 +284,8 @@ async function main() {
   assert.deepEqual(tune([200, 100, 50], {redGain: 50, greenGain: 120}), [100, 120, 50], 'red and green gains scale their channel');
   assert.deepEqual(tune([250, 250, 250], {greenGain: 150}), [250, 255, 250], 'gains clip at full drive');
   assert.deepEqual(tune([0, 0, 0], {blueGain: 150}), [0, 0, 0], 'gains keep black unlit');
+  assert.equal(sanitizePanelTuning({blueGain: 20}).blueGain, 20, 'blue can go down to 20% (50% was not enough on the strong-blue panel)');
+  assert.equal(sanitizePanelTuning({blueGain: 5}).blueGain, 20, 'gains are clamped at 20%');
   assert.deepEqual(tune([0, 0, 200], {blueGain: 70, floor: 36}), [0, 0, Math.round(36 + 219 * 140 / 255)], 'gains apply before the floor lift');
   assert.deepEqual(sanitizePanelTuning({brightness: 999, gamma: 1.2000000000000002, warmth: 'x'}), {...DEFAULT_PANEL_TUNING, brightness: 200, gamma: 1.2}, 'stored tuning is clamped and rounded');
   assert.deepEqual(sanitizePanelTuning(null), DEFAULT_PANEL_TUNING, 'nothing stored: the measured defaults');

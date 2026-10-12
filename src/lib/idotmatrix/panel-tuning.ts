@@ -36,9 +36,9 @@ export const PANEL_TUNING_RANGES: Record<PanelTuningKey, { min: number; max: num
   warmth: { min: -100, max: 100, step: 5, neutral: 0, initial: 0 },
   // Measured on an IDM-0384DA 32x32: red, green, blue and white all start to light between 32 and 40.
   floor: { min: 0, max: 80, step: 2, neutral: 0, initial: 36 },
-  redGain: { min: 50, max: 150, step: 1, neutral: 100, initial: 100 },
-  greenGain: { min: 50, max: 150, step: 1, neutral: 100, initial: 100 },
-  blueGain: { min: 50, max: 150, step: 1, neutral: 100, initial: 100 }
+  redGain: { min: 20, max: 150, step: 1, neutral: 100, initial: 100 },
+  greenGain: { min: 20, max: 150, step: 1, neutral: 100, initial: 100 },
+  blueGain: { min: 20, max: 150, step: 1, neutral: 100, initial: 100 }
 };
 
 export const PANEL_TUNING_KEYS = Object.keys(PANEL_TUNING_RANGES) as PanelTuningKey[];
